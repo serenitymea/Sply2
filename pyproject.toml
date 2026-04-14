@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "clipmaker"
+version = "1.0.0"
+description = "Automatic video editor"
+requires-python = ">=3.11"
+dependencies = [
+    "librosa==0.10.2",
+    "soundfile==0.12.1",
+    "opencv-python-headless==4.10.0.84",
+    "numpy==1.26.4",
+]
+
+[project.scripts]
+clipmaker = "clipmaker.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["clipmaker*"]

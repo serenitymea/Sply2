@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  clipmaker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: clipmaker:latest
+    container_name: clipmaker
+
+    # input/output from host
+    volumes:
+      - ./input:/data/input:ro      # video + music
+      - ./output:/data/output       # result
+
+    # put video.mp4 and music.mp3 in ./input/
+    # docker compose run clipmaker /data/input/video.mp4 --music /data/input/music.mp3 -o /data/output/result.mp4
+    command: ["--help"]
+
+    # resourse restriction
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2.0"
+        reservations:
+          memory: 512m
+
+    restart: "no"
