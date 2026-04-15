@@ -30,7 +30,7 @@ class VideoFeatures:
 # Audio
 
 def analyze_audio(music_path: str) -> AudioFeatures:
-    """Загружает аудио, находит BPM и времена битов."""
+    """load audio, find BPM and beat times"""
     print(f"[analyzer] audio: {music_path}")
     y, sr = librosa.load(music_path, sr=22050, mono=True)
 

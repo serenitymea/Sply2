@@ -29,21 +29,6 @@ class Clip:
     def duration(self) -> float:
         return self.end - self.start
 
-# Optional ML re-scoring
-
-def _try_load_model():
-    """Loads the last trained model"""
-    try:
-        import joblib
-        files = sorted(glob.glob("model_output/model_*.pkl"))
-        if files:
-            model = joblib.load(files[-1])
-            print(f"[selector] ML model: {files[-1]}")
-            return model
-    except ImportError:
-        pass
-    return None
-
 # Core selection
 
 def select_clips(
@@ -74,7 +59,7 @@ def select_clips(
     else:
         max_clips = min(max_clips, n_beats)
 
-    model = _try_load_model()
+    model = None
 
     clips: List[Clip] = []
     # The number of occupied seconds in the video (including overlap_seconds)
@@ -166,26 +151,3 @@ def _overlaps(start: float, end: float, used: list, margin: float) -> bool:
         if start < u_end + margin and end > u_start - margin:
             return True
     return False
-
-
-def _ml_rerank(clips: List[Clip], video: VideoFeatures, model) -> List[Clip]:
-    """optional ml_rerank"""
-    try:
-        features = np.array([
-            [c.score, c.duration, c.start / video.duration]
-            for c in clips
-        ], dtype=np.float32)
-
-        if hasattr(model, "predict_proba"):
-            ml_scores = model.predict_proba(features)[:, 1]
-        else:
-            ml_scores = model.predict(features)
-
-        for clip, ml_score in zip(clips, ml_scores):
-            clip.score = float(ml_score)
-
-        print("[selector] ML scores applied")
-    except Exception as e:
-        print(f"[selector] ML re-scoring failed: {e} — using heuristic scores")
-
-    return clips
