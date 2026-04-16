@@ -1,10 +1,11 @@
 import asyncio
 import logging
-from typing import Optional, Callable, Awaitable
+from typing import Awaitable, Callable, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
-PROCESSING_TIMEOUT = 500  #timeout for one user
+PROCESSING_TIMEOUT = 500
+CancelResult = Literal["queued", "active", "missing"]
 
 
 class QueueManager:
@@ -15,6 +16,7 @@ class QueueManager:
         self._waiting_users: list[int] = []
         self._process_callback = process_callback
         self._worker_task: Optional[asyncio.Task] = None
+        self._current_process_task: Optional[asyncio.Task] = None
 
     def set_process_callback(self, callback: Callable[[int], Awaitable[None]]) -> None:
         self._process_callback = callback
@@ -39,22 +41,31 @@ class QueueManager:
                 return self._waiting_users.index(user_id) + 1
         return None
 
-    async def cancel(self, user_id: int) -> None:
+    async def cancel(self, user_id: int) -> CancelResult:
         async with self._lock:
+            if user_id == self._active_user:
+                if self._current_process_task and not self._current_process_task.done():
+                    self._current_process_task.cancel()
+                return "active"
+
             if user_id not in self._waiting_users:
-                return
+                return "missing"
+
             self._waiting_users.remove(user_id)
-            
-            remaining = []
+
+            remaining: list[int] = []
             while not self._queue.empty():
                 try:
                     remaining.append(self._queue.get_nowait())
                     self._queue.task_done()
                 except asyncio.QueueEmpty:
                     break
+
             for uid in remaining:
                 if uid != user_id:
                     await self._queue.put(uid)
+
+            return "queued"
 
     @property
     def active_user(self) -> Optional[int]:
@@ -79,17 +90,22 @@ class QueueManager:
             logger.info(f"[Queue] START user={user_id} | queue_size={self.queue_size}")
             try:
                 if self._process_callback:
+                    self._current_process_task = asyncio.create_task(
+                        self._process_callback(user_id)
+                    )
                     await asyncio.wait_for(
-                        self._process_callback(user_id),
+                        self._current_process_task,
                         timeout=PROCESSING_TIMEOUT,
                     )
             except asyncio.TimeoutError:
                 logger.error(f"[Queue] TIMEOUT user={user_id}")
-
+            except asyncio.CancelledError:
+                logger.info(f"[Queue] CANCELLED user={user_id}")
             except Exception as e:
                 logger.exception(f"[Queue] ERROR user={user_id}: {e}")
             finally:
                 async with self._lock:
                     self._active_user = None
+                    self._current_process_task = None
                 self._queue.task_done()
                 logger.info(f"[Queue] DONE user={user_id}")

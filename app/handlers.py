@@ -157,7 +157,11 @@ class VideoBot:
             await update.message.reply_text("Нечего отменять. Начни с /run")
             return ConversationHandler.END
 
-        await self._queue.cancel(user_id)
+        cancel_result = await self._queue.cancel(user_id)
+        if cancel_result == "active":
+            await update.message.reply_text("Отмена запрошена. Останавливаю текущую обработку.")
+            return ConversationHandler.END
+
         self._drop_session(user_id)
         await update.message.reply_text(
             "❌ Операция отменена.\n"
@@ -204,7 +208,7 @@ class VideoBot:
         await update.message.reply_text(
             "✅ Аудио получено!\n\n"
             "🎬 Шаг 2 из 2: Отправляй видео файлы\n"
-            f"Максимум: {MAX_VIDEOS} видео, каждое до 200 MB\n"
+            f"Максимум: {MAX_VIDEOS} видео, каждое до 20 MB\n"
             "Суммарная длительность всех видео — не более 10 минут.\n\n"
             "Когда отправишь все — напиши /done\n"
             "❌ Для отмены — /cancel"
@@ -334,6 +338,13 @@ class VideoBot:
                     supports_streaming=True,
                 )
 
+        except asyncio.CancelledError:
+            logger.info(f"[Process] CANCELLED user={user_id}")
+            await self._notify(
+                session.chat_id,
+                "Обработка отменена. Можешь начать заново с /run."
+            )
+            raise
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - start_time
             logger.error(f"[Process] TIMEOUT user={user_id} after {elapsed:.0f}s")

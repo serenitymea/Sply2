@@ -8,7 +8,7 @@ from .ffmpeg_service import FFmpegService
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 MAX_VIDEOS = 5
 MAX_TOTAL_DURATION_SEC = 10 * 60
 
@@ -48,7 +48,7 @@ def _check_size(file_obj) -> None:
     size = getattr(file_obj, "file_size", None)
     if size and size > MAX_FILE_SIZE_BYTES:
         mb = size // (1024 * 1024)
-        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 200 MB.")
+        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 20 MB.")
 
 
 def _guess_suffix(file_obj, default: str) -> str:
