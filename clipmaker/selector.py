@@ -88,9 +88,6 @@ def select_clips(
         used_ranges.append((clip.start - overlap_seconds,
                              clip.end + overlap_seconds))
 
-    if model is not None:
-        clips = _ml_rerank(clips, video, model)
-
     print(f"[selector] {len(clips)} clips selected")
     if clips:
         avg = sum(c.score for c in clips) / len(clips)

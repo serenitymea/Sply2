@@ -19,12 +19,9 @@ from .queue_manager import QueueManager
 
 logger = logging.getLogger(__name__)
 
-WAIT_AUDIO, WAIT_PROMPT, WAIT_VIDEO = range(3)
+WAIT_AUDIO, WAIT_VIDEO = range(2)
 
 PROCESSING_TIMEOUT = 500
-
-PROMPT_MIN_LEN = 10
-PROMPT_MAX_LEN = 1000
 
 
 @dataclass
@@ -32,7 +29,6 @@ class UserSession:
     tmp_dir: Path
     chat_id: int
     audio_path: Path = None
-    prompt_text: str = ""
     video_files: list[str] = field(default_factory=list)
     total_video_duration: float = 0.0
     done_called: bool = False
@@ -48,7 +44,6 @@ class VideoBot:
 
     @staticmethod
     def _cleanup_stale_tmp() -> None:
-
         import glob
         stale = glob.glob("/tmp/vbot_*")
         for path in stale:
@@ -59,7 +54,6 @@ class VideoBot:
                 logger.warning(f"Failed to clean up {path}: {e}")
         if stale:
             logger.info(f"Cleaned up {len(stale)} stale tmp dir(s) on startup")
-
 
     async def _notify(self, chat_id: int, text: str) -> None:
         try:
@@ -111,7 +105,7 @@ class VideoBot:
 
         await update.message.reply_text(
             "🎬 Начинаем!\n\n"
-            "🎵 Шаг 1 из 3: Отправь аудио файл или ссылку на музыку\n"
+            "🎵 Шаг 1 из 2: Отправь аудио файл или ссылку на музыку\n"
             "(TikTok)\n\n"
             "❌ Для отмены — /cancel"
         )
@@ -209,45 +203,9 @@ class VideoBot:
         session.audio_path = audio_path
         await update.message.reply_text(
             "✅ Аудио получено!\n\n"
-            "✍️ Шаг 2 из 3: Опиши стиль и настроение видео (промт)\n\n"
-            "Пример:\n"
-            "_anime psychological thriller, dark ambient music, slow cuts, neon city lights, paranoid mood_\n\n"
-            "Чем подробнее — тем точнее результат. От 10 до 1000 символов.\n\n"
-            "❌ Для отмены — /cancel",
-            parse_mode="Markdown"
-        )
-        return WAIT_PROMPT
-
-    async def receive_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        session = self._get_session(user_id)
-
-        if not session:
-            await update.message.reply_text("Сессия не найдена. Начни с /run")
-            return ConversationHandler.END
-
-        text = update.message.text.strip()
-
-        if len(text) < PROMPT_MIN_LEN:
-            await update.message.reply_text(
-                f"❌ Промт слишком короткий (минимум {PROMPT_MIN_LEN} символов).\n"
-                "Опиши стиль подробнее — например жанр, настроение, визуальный стиль."
-            )
-            return WAIT_PROMPT
-
-        if len(text) > PROMPT_MAX_LEN:
-            await update.message.reply_text(
-                f"❌ Промт слишком длинный (максимум {PROMPT_MAX_LEN} символов, сейчас {len(text)}).\n"
-                "Сократи описание."
-            )
-            return WAIT_PROMPT
-
-        session.prompt_text = text
-        await update.message.reply_text(
-            f"✅ Промт сохранён!\n\n"
-            f"🎬 Шаг 3 из 3: Отправляй видео файлы\n"
+            "🎬 Шаг 2 из 2: Отправляй видео файлы\n"
             f"Максимум: {MAX_VIDEOS} видео, каждое до 200 MB\n"
-            f"Суммарная длительность всех видео — не более 10 минут.\n\n"
+            "Суммарная длительность всех видео — не более 10 минут.\n\n"
             "Когда отправишь все — напиши /done\n"
             "❌ Для отмены — /cancel"
         )
@@ -288,7 +246,6 @@ class VideoBot:
             )
             return WAIT_VIDEO
         except RuntimeError as e:
-            # RuntimeError прилетает из get_video_duration — внятно сообщаем пользователю
             await update.message.reply_text(f"❌ {e}")
             return WAIT_VIDEO
         except Exception as e:
@@ -358,7 +315,6 @@ class VideoBot:
             pipeline = PipelineService(
                 video_files=session.video_files,
                 audio_path=session.audio_path,
-                prompt_text=session.prompt_text,
                 tmp_dir=session.tmp_dir,
                 output_path=output_path,
             )
@@ -413,9 +369,6 @@ class VideoBot:
                         (filters.AUDIO | filters.VOICE | filters.Document.ALL | filters.TEXT) & ~filters.COMMAND,
                         self.receive_audio,
                     )
-                ],
-                WAIT_PROMPT: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.receive_prompt)
                 ],
                 WAIT_VIDEO: [
                     CommandHandler("done", self.cmd_done),
