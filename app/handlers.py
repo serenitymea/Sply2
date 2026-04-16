@@ -14,6 +14,7 @@ from telegram.ext import (
 
 from .services.video_service import VideoService, MAX_VIDEOS, MAX_TOTAL_DURATION_SEC
 from .services.pipeline_service import PipelineService
+from .access_control import DAILY_GENERATION_LIMIT, DailyUsageLimiter, load_admin_ids
 from .paths import ensure_output_root, ensure_tmp_root
 from .queue_manager import QueueManager
 
@@ -39,6 +40,8 @@ class VideoBot:
         self._queue = queue_manager
         self._bot = bot
         self._sessions: dict[int, UserSession] = {}
+        self._admin_ids = load_admin_ids()
+        self._usage_limiter = DailyUsageLimiter()
         self._queue.set_process_callback(self._process_user)
         self._cleanup_stale_tmp()
 
@@ -62,6 +65,9 @@ class VideoBot:
 
     def _get_session(self, user_id: int) -> UserSession | None:
         return self._sessions.get(user_id)
+
+    def _is_admin(self, user_id: int) -> bool:
+        return user_id in self._admin_ids
 
     def _create_session(self, user_id: int, chat_id: int) -> UserSession:
         tmp_dir = ensure_tmp_root() / f"vbot_{user_id}_{int(time.time() * 1000)}"
@@ -88,6 +94,17 @@ class VideoBot:
 
     async def cmd_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
+
+        remaining = await self._usage_limiter.get_remaining(
+            user_id,
+            is_admin=self._is_admin(user_id),
+        )
+        if remaining == 0:
+            await update.message.reply_text(
+                f"Лимит на сегодня исчерпан: {DAILY_GENERATION_LIMIT} генераций.\n"
+                "Попробуй снова завтра."
+            )
+            return ConversationHandler.END
 
         position = await self._queue.get_position(user_id)
         if position is not None:
@@ -130,6 +147,18 @@ class VideoBot:
             )
             return WAIT_VIDEO
 
+        allowed, remaining = await self._usage_limiter.consume(
+            user_id,
+            is_admin=self._is_admin(user_id),
+        )
+        if not allowed:
+            await update.message.reply_text(
+                f"Лимит на сегодня исчерпан: {DAILY_GENERATION_LIMIT} генераций.\n"
+                "Попробуй снова завтра."
+            )
+            return ConversationHandler.END
+
+        remaining_hint = "" if remaining is None else f"\nОсталось генераций сегодня: {remaining}"
         session.done_called = True
         position = await self._queue.enqueue(user_id)
 

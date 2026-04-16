@@ -4,6 +4,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TMP_ROOT = PROJECT_ROOT / "tmp"
 OUTPUT_ROOT = PROJECT_ROOT / "output"
+DATA_ROOT = PROJECT_ROOT / "data"
 
 
 def ensure_dir(path: Path) -> Path:
@@ -17,3 +18,7 @@ def ensure_tmp_root() -> Path:
 
 def ensure_output_root() -> Path:
     return ensure_dir(OUTPUT_ROOT)
+
+
+def ensure_data_root() -> Path:
+    return ensure_dir(DATA_ROOT)
