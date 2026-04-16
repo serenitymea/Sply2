@@ -3,7 +3,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Таймаут на одну ffmpeg-команду (секунды)
 FFMPEG_TIMEOUT = 300
 
 
@@ -32,23 +31,28 @@ class FFmpegService:
 
         if process.returncode != 0:
             err_text = stderr.decode(errors="replace").strip()
-            # Показываем только последние 3 строки ошибки
-            lines = [l for l in err_text.splitlines() if l.strip()]
+            lines = [line for line in err_text.splitlines() if line.strip()]
             short_err = "\n".join(lines[-3:]) if lines else "неизвестная ошибка"
             raise RuntimeError(f"ffmpeg завершился с ошибкой:\n{short_err}")
 
     async def to_mp3(self, input_path: str, output_path: str) -> None:
         await self.run(
             "-i", input_path,
-            "-vn",            # только аудио
-            "-q:a", "0",      # лучшее качество
+            "-vn",
+            "-q:a", "0",
             output_path,
         )
 
     async def to_mp4(self, input_path: str, output_path: str) -> None:
         await self.run(
             "-i", input_path,
-            "-c", "copy",     # без перекодирования
+            "-map", "0:v:0",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "18",
+            "-c:a", "aac",
+            "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         )

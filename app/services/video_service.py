@@ -8,9 +8,9 @@ from .ffmpeg_service import FFmpegService
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024   # 200 MB
+MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024
 MAX_VIDEOS = 5
-MAX_TOTAL_DURATION_SEC = 10 * 60  # 10 min
+MAX_TOTAL_DURATION_SEC = 10 * 60
 
 SUPPORTED_AUDIO_MIME = {
     "audio/mpeg", "audio/mp3", "audio/ogg", "audio/wav",
@@ -21,19 +21,44 @@ SUPPORTED_VIDEO_MIME = {
     "video/webm", "video/avi", "video/x-msvideo",
 }
 
+MIME_SUFFIXES = {
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/flac": ".flac",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv",
+    "video/webm": ".webm",
+    "video/avi": ".avi",
+    "video/x-msvideo": ".avi",
+}
+
 TG_DOWNLOAD_TIMEOUT = 120
 
 
 def _is_url(text: str) -> bool:
-    t = text.strip().lower()
-    return t.startswith(("http://", "https://", "www."))
+    return text.strip().lower().startswith(("http://", "https://", "www."))
 
 
 def _check_size(file_obj) -> None:
     size = getattr(file_obj, "file_size", None)
     if size and size > MAX_FILE_SIZE_BYTES:
         mb = size // (1024 * 1024)
-        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум — 200 MB.")
+        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 200 MB.")
+
+
+def _guess_suffix(file_obj, default: str) -> str:
+    file_name = getattr(file_obj, "file_name", "") or ""
+    suffix = Path(file_name).suffix.lower()
+    if suffix:
+        return suffix
+
+    mime_type = (getattr(file_obj, "mime_type", "") or "").lower()
+    return MIME_SUFFIXES.get(mime_type, default)
 
 
 async def _download_tg_file(file_obj, dest: Path) -> None:
@@ -42,7 +67,6 @@ async def _download_tg_file(file_obj, dest: Path) -> None:
 
 
 async def get_video_duration(video_path: Path) -> float:
-
     try:
         process = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error",
@@ -81,8 +105,9 @@ class VideoService:
         if msg.text and _is_url(msg.text):
             await msg.reply_text("⏬ Скачиваю аудио по ссылке... Это может занять до нескольких минут.")
             downloaded = await self._downloader.download(msg.text.strip())
+            audio_path.unlink(missing_ok=True)
             shutil.copy(downloaded, audio_path)
-
+            final_path = audio_path
         elif msg.audio or msg.voice or msg.document:
             file_obj = None
             if msg.audio:
@@ -101,7 +126,9 @@ class VideoService:
             _check_size(file_obj)
             await msg.reply_text("⏬ Получаю аудио файл...")
 
-            raw_path = self._tmp_dir / "audio_raw"
+            raw_path = self._tmp_dir / f"audio_raw{_guess_suffix(file_obj, '.bin')}"
+            raw_path.unlink(missing_ok=True)
+            audio_path.unlink(missing_ok=True)
             try:
                 await _download_tg_file(file_obj, raw_path)
             except asyncio.TimeoutError:
@@ -112,26 +139,23 @@ class VideoService:
 
             try:
                 await self._ffmpeg.to_mp3(str(raw_path), str(audio_path))
-            except Exception:
-                
-                logger.warning("ffmpeg conversion failed, using raw file")
-                shutil.copy(raw_path, audio_path)
-
-            raw_path.unlink(missing_ok=True)
-
+                raw_path.unlink(missing_ok=True)
+                final_path = audio_path
+            except Exception as e:
+                logger.warning("ffmpeg audio conversion failed, using original file: %s", e)
+                final_path = raw_path
         else:
             raise ValueError(
                 "Отправь аудио файл (mp3, wav, ogg) или ссылку на музыку"
             )
 
-        if not audio_path.exists() or audio_path.stat().st_size == 0:
+        if not final_path.exists() or final_path.stat().st_size == 0:
             raise ValueError("Не удалось обработать аудио файл. Попробуй другой.")
 
-        logger.info(f"Audio ready: {audio_path} ({audio_path.stat().st_size // 1024} KB)")
-        return audio_path
+        logger.info(f"Audio ready: {final_path} ({final_path.stat().st_size // 1024} KB)")
+        return final_path
 
-
-    async def acquire_video(self, msg, idx: int, current_total_duration: float = 0.0) -> Path:
+    async def acquire_video(self, msg, idx: int, current_total_duration: float = 0.0) -> tuple[Path, float]:
         video_path = self._tmp_dir / f"video_{idx}.mp4"
 
         file_obj = None
@@ -153,7 +177,9 @@ class VideoService:
         _check_size(file_obj)
         await msg.reply_text(f"⏬ Получаю видео #{idx + 1}...")
 
-        raw_path = self._tmp_dir / f"video_raw_{idx}"
+        raw_path = self._tmp_dir / f"video_raw_{idx}{_guess_suffix(file_obj, '.bin')}"
+        raw_path.unlink(missing_ok=True)
+        video_path.unlink(missing_ok=True)
         try:
             await _download_tg_file(file_obj, raw_path)
         except asyncio.TimeoutError:
@@ -164,19 +190,19 @@ class VideoService:
 
         try:
             await self._ffmpeg.to_mp4(str(raw_path), str(video_path))
-        except Exception:
-            logger.warning(f"ffmpeg video conversion failed for video_{idx}, using raw")
-            shutil.copy(raw_path, video_path)
+            raw_path.unlink(missing_ok=True)
+            final_path = video_path
+        except Exception as e:
+            logger.warning("ffmpeg video conversion failed for video_%s, using original file: %s", idx, e)
+            final_path = raw_path
 
-        raw_path.unlink(missing_ok=True)
-
-        if not video_path.exists() or video_path.stat().st_size == 0:
+        if not final_path.exists() or final_path.stat().st_size == 0:
             raise ValueError("Не удалось обработать видео файл. Попробуй другой.")
 
-        duration = await get_video_duration(video_path)
+        duration = await get_video_duration(final_path)
         new_total = current_total_duration + duration
         if new_total > MAX_TOTAL_DURATION_SEC:
-            video_path.unlink(missing_ok=True)
+            final_path.unlink(missing_ok=True)
             current_min = int(current_total_duration) // 60
             current_sec = int(current_total_duration) % 60
             clip_min = int(duration) // 60
@@ -188,5 +214,5 @@ class VideoService:
                 f"Отправь видео покороче или начни обработку с /done."
             )
 
-        logger.info(f"Video ready: {video_path} ({video_path.stat().st_size // (1024*1024)} MB, {duration:.1f}s)")
-        return video_path, duration
+        logger.info(f"Video ready: {final_path} ({final_path.stat().st_size // (1024 * 1024)} MB, {duration:.1f}s)")
+        return final_path, duration

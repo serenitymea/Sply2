@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import shutil
-import tempfile
 import time
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -15,6 +14,7 @@ from telegram.ext import (
 
 from .services.video_service import VideoService, MAX_VIDEOS, MAX_TOTAL_DURATION_SEC
 from .services.pipeline_service import PipelineService
+from .paths import ensure_output_root, ensure_tmp_root
 from .queue_manager import QueueManager
 
 logger = logging.getLogger(__name__)
@@ -44,8 +44,7 @@ class VideoBot:
 
     @staticmethod
     def _cleanup_stale_tmp() -> None:
-        import glob
-        stale = glob.glob("/tmp/vbot_*")
+        stale = list(ensure_tmp_root().glob("vbot_*"))
         for path in stale:
             try:
                 shutil.rmtree(path, ignore_errors=True)
@@ -65,7 +64,8 @@ class VideoBot:
         return self._sessions.get(user_id)
 
     def _create_session(self, user_id: int, chat_id: int) -> UserSession:
-        tmp_dir = Path(tempfile.mkdtemp(prefix=f"vbot_{user_id}_"))
+        tmp_dir = ensure_tmp_root() / f"vbot_{user_id}_{int(time.time() * 1000)}"
+        tmp_dir.mkdir(parents=True, exist_ok=False)
         session = UserSession(tmp_dir=tmp_dir, chat_id=chat_id)
         self._sessions[user_id] = session
         return session
@@ -298,8 +298,7 @@ class VideoBot:
             logger.warning(f"No session for user={user_id}")
             return
 
-        output_dir = Path("output")
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = ensure_output_root()
         output_path = output_dir / f"final_{user_id}_{int(time.time())}.mp4"
         start_time = time.monotonic()
 

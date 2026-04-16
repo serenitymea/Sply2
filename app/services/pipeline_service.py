@@ -40,8 +40,7 @@ class PipelineService:
             video = analyze_video(self._video_files[0], sample_fps=self._sample_fps)
             clips = select_clips(video, audio, max_clips=self._max_clips)
             return clips, None
-        else:
-            return self._run_multi_video(audio)
+        return self._run_multi_video(audio)
 
     def _run_multi_video(self, audio):
         n = len(self._video_files)
@@ -51,7 +50,7 @@ class PipelineService:
         all_sources: list[str] = []
 
         for i, vpath in enumerate(self._video_files):
-            logger.info(f"[Pipeline] Video {i+1}/{n}: {vpath}")
+            logger.info(f"[Pipeline] Video {i + 1}/{n}: {vpath}")
             video = analyze_video(vpath, sample_fps=self._sample_fps)
             clips = select_clips(video, audio, max_clips=per_video)
             all_clips.extend(clips)
@@ -60,18 +59,18 @@ class PipelineService:
         merged_clips: list = []
         merged_sources: list[str] = []
         groups = [
-            [(c, s) for c, s in zip(all_clips, all_sources) if s == vp]
-            for vp in self._video_files
+            [(clip, source) for clip, source in zip(all_clips, all_sources) if source == video_path]
+            for video_path in self._video_files
         ]
-        iters = [iter(g) for g in groups]
+        iters = [iter(group) for group in groups]
         active = list(range(n))
         while active:
             next_active = []
             for i in active:
                 try:
-                    c, s = next(iters[i])
-                    merged_clips.append(c)
-                    merged_sources.append(s)
+                    clip, source = next(iters[i])
+                    merged_clips.append(clip)
+                    merged_sources.append(source)
                     next_active.append(i)
                 except StopIteration:
                     pass
@@ -81,10 +80,9 @@ class PipelineService:
         return merged_clips[:cap], merged_sources[:cap]
 
     def _run_blocking(self) -> None:
-        input_dir = Path("input")
-        input_dir.mkdir(parents=True, exist_ok=True)
-
-        audio_path = input_dir / "m1.mp3"
+        self._tmp_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = self._tmp_dir / f"pipeline_audio{self._audio_path.suffix or '.bin'}"
+        audio_path.unlink(missing_ok=True)
         shutil.copy(str(self._audio_path), str(audio_path))
 
         pipeline_output = self._tmp_dir / "pipeline.mp4"
@@ -107,20 +105,19 @@ class PipelineService:
         )
 
         if not pipeline_output.exists() or pipeline_output.stat().st_size == 0:
-            raise RuntimeError("Ошибка в pipeline — выходной файл не создан.")
+            raise RuntimeError("Ошибка в pipeline: выходной файл не создан.")
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(pipeline_output), str(self._output_path))
 
-        for path in (audio_path,):
-            if path.exists():
-                path.unlink(missing_ok=True)
+        if audio_path.exists():
+            audio_path.unlink(missing_ok=True)
 
         if not self._output_path.exists() or self._output_path.stat().st_size == 0:
             raise RuntimeError("Финальный файл не был создан. Проверь исходные видео и аудио.")
 
         logger.info(
-            f"[Pipeline] Done → {self._output_path} "
+            f"[Pipeline] Done -> {self._output_path} "
             f"({self._output_path.stat().st_size // (1024 * 1024)} MB)"
         )
 
