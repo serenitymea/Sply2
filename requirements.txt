@@ -6,3 +6,9 @@ opencv-python-headless==4.10.0.84
 numpy==1.26.4
 
 joblib==1.4.2
+
+python-dotenv
+
+yt_dlp
+
+python-telegram-bot
