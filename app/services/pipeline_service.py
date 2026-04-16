@@ -21,7 +21,7 @@ class PipelineService:
         speed: float = 1.0,
         resolution: str | None = None,
         max_clips: int | None = None,
-        effects: bool = False,
+        effects: bool = True,
         sample_fps: float = 4.0,
     ):
         self._video_files = video_files

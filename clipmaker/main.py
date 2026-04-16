@@ -72,6 +72,7 @@ def parse_args(argv=None):
     p.add_argument(
         "--effects",
         action="store_true",
+        default=True,
         help="Применить лёгкую цветокоррекцию",
     )
     p.add_argument(

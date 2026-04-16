@@ -39,7 +39,7 @@ def render(
     fps: int = 30,
     speed: float = 1.0,
     resolution: Optional[str] = None,
-    effects: bool = False,
+    effects: bool = True,
     clip_sources: Optional[List[str]] = None,
 ) -> str:
     """
