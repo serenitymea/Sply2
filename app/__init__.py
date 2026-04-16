@@ -1,3 +1,8 @@
-from .bot import BotApp
-from .queue_manager import QueueManager
-from .handlers import VideoBot
+"""Application package."""
+
+__all__ = [
+    "bot",
+    "handlers",
+    "queue_manager",
+    "services",
+]
