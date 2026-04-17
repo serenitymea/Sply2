@@ -178,7 +178,7 @@ def _detect_resolution(video_path: str) -> str:
 
         best = min(_RESOLUTIONS, key=lambda r: abs(r[0] - aspect))
         res = best[1]
-        print(f"[renderer] source {w}x{h} → output {res}")
+        print(f"[renderer] source {w}x{h} -> output {res}")
         return res
 
     except Exception as e:

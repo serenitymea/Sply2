@@ -137,7 +137,7 @@ def main(argv=None):
     )
 
     elapsed = time.perf_counter() - t0
-    print(f"\n✓ Готово за {elapsed:.1f}s → {args.output}")
+    print(f"\n[ok] Ready in {elapsed:.1f}s -> {args.output}")
 
 
 def _run_multi_video(

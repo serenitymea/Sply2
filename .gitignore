@@ -121,3 +121,4 @@ secrets.toml
 clipmaker/gui.py
 tests
 output.mp4
+data/runtime_state.json
