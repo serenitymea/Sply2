@@ -1,11 +1,10 @@
 import asyncio
-import json
 import os
-import tempfile
 from datetime import date
 from pathlib import Path
 
 from .paths import ensure_data_root
+from .shared_state import locked_json_state
 
 DAILY_GENERATION_LIMIT = 5
 USAGE_STATE_FILE = ensure_data_root() / "generation_usage.json"
@@ -39,82 +38,60 @@ class DailyUsageLimiter:
             return None
 
         async with self._lock:
-            state = self._read_state()
-            today = self._today_key()
-            used = int(state.get(today, {}).get(str(user_id), 0))
-            return max(0, self._limit - used)
+            with locked_json_state(self._state_file) as state:
+                self._sanitize_state(state)
+                today = self._today_key()
+                used = int(state.get(today, {}).get(str(user_id), 0))
+                return max(0, self._limit - used)
 
     async def consume(self, user_id: int, is_admin: bool = False) -> tuple[bool, int | None]:
         if is_admin:
             return True, None
 
         async with self._lock:
-            state = self._read_state()
-            today = self._today_key()
-            today_usage = state.setdefault(today, {})
-            used = int(today_usage.get(str(user_id), 0))
-            if used >= self._limit:
-                return False, 0
+            with locked_json_state(self._state_file) as state:
+                self._sanitize_state(state)
+                today = self._today_key()
+                today_usage = state.setdefault(today, {})
+                used = int(today_usage.get(str(user_id), 0))
+                if used >= self._limit:
+                    return False, 0
 
-            used += 1
-            today_usage[str(user_id)] = used
-            self._write_state(state)
-            return True, self._limit - used
+                used += 1
+                today_usage[str(user_id)] = used
+                return True, self._limit - used
 
     async def refund(self, user_id: int, is_admin: bool = False) -> None:
         if is_admin:
             return
 
         async with self._lock:
-            state = self._read_state()
-            today = self._today_key()
-            today_usage = state.get(today, {})
-            used = int(today_usage.get(str(user_id), 0))
-            if used <= 0:
-                return
+            with locked_json_state(self._state_file) as state:
+                self._sanitize_state(state)
+                today = self._today_key()
+                today_usage = state.get(today, {})
+                used = int(today_usage.get(str(user_id), 0))
+                if used <= 0:
+                    return
 
-            used -= 1
-            if used == 0:
-                today_usage.pop(str(user_id), None)
-            else:
-                today_usage[str(user_id)] = used
+                used -= 1
+                if used == 0:
+                    today_usage.pop(str(user_id), None)
+                else:
+                    today_usage[str(user_id)] = used
 
-            if not today_usage:
-                state.pop(today, None)
-
-            self._write_state(state)
+                if not today_usage:
+                    state.pop(today, None)
 
     def _today_key(self) -> str:
         return date.today().isoformat()
 
-    def _read_state(self) -> dict:
-        if not self._state_file.exists():
-            return {}
-
-        try:
-            data = json.loads(self._state_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
-
-        if not isinstance(data, dict):
-            return {}
-
+    def _sanitize_state(self, data: dict) -> None:
         today = self._today_key()
-        return {
+        sanitized = {
             day: usage
             for day, usage in data.items()
             if isinstance(usage, dict) and day >= today
         }
-
-    def _write_state(self, state: dict) -> None:
-        self._state_file.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(state, ensure_ascii=True, indent=2)
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=self._state_file.parent,
-            delete=False,
-        ) as tmp:
-            tmp.write(payload)
-            tmp_path = Path(tmp.name)
-        os.replace(tmp_path, self._state_file)
+        data.clear()
+        data.update(sanitized)

@@ -12,13 +12,7 @@ import yt_dlp
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 300
-ALLOWED_URL_HOSTS = {
-    "tiktok.com",
-    "www.tiktok.com",
-    "m.tiktok.com",
-    "vm.tiktok.com",
-    "vt.tiktok.com",
-}
+ALLOWED_URL_ROOT = "tiktok.com"
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -130,7 +124,7 @@ class MediaDownloader:
         if not host:
             raise ValueError("Не удалось распознать адрес ссылки.")
 
-        if host not in ALLOWED_URL_HOSTS:
+        if host != ALLOWED_URL_ROOT and not host.endswith(f".{ALLOWED_URL_ROOT}"):
             raise ValueError("Сейчас поддерживаются только ссылки TikTok.")
 
         try:
@@ -205,6 +199,9 @@ class MediaDownloader:
 
         except yt_dlp.utils.DownloadError as e:
             raise ValueError(_classify_error(_clean(str(e)).lower()))
+
+        except ValueError:
+            raise
 
         except Exception:
             raise ValueError(_DEFAULT_ERROR)

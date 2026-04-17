@@ -17,6 +17,7 @@ from .services.pipeline_service import PipelineService
 from .access_control import DAILY_GENERATION_LIMIT, DailyUsageLimiter, load_admin_ids
 from .paths import ensure_output_root, ensure_tmp_root
 from .queue_manager import QueueManager
+from .runtime_control import RuntimeControl
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ PROCESSING_TIMEOUT = 500
 SESSION_TTL_SEC = 10 * 60
 SESSION_CLEANUP_INTERVAL_SEC = 60
 MAX_ACTIVE_SESSIONS = 20
+SESSION_RUNTIME_TTL_SEC = SESSION_TTL_SEC + 120
+PIPELINE_SLOT_TTL_SEC = PROCESSING_TIMEOUT + 120
 
 
 @dataclass
@@ -46,6 +49,7 @@ class VideoBot:
         self._sessions: dict[int, UserSession] = {}
         self._admin_ids = load_admin_ids()
         self._usage_limiter = DailyUsageLimiter()
+        self._runtime = RuntimeControl()
         self._queue.set_process_callback(self._process_user)
         self._cleanup_stale_tmp()
         self._session_cleanup_task = asyncio.create_task(self._cleanup_expired_sessions_loop())
@@ -74,9 +78,10 @@ class VideoBot:
     def _is_admin(self, user_id: int) -> bool:
         return user_id in self._admin_ids
 
-    def _touch_session(self, session: UserSession | None) -> None:
+    def _touch_session(self, user_id: int, session: UserSession | None) -> None:
         if session:
             session.last_activity = time.time()
+            self._runtime.touch_session(user_id, SESSION_RUNTIME_TTL_SEC)
 
     def _create_session(self, user_id: int, chat_id: int) -> UserSession:
         tmp_dir = ensure_tmp_root() / f"vbot_{user_id}_{int(time.time() * 1000)}"
@@ -87,8 +92,23 @@ class VideoBot:
 
     def _drop_session(self, user_id: int) -> None:
         session = self._sessions.pop(user_id, None)
+        self._runtime.unregister_session(user_id)
         if session:
             shutil.rmtree(session.tmp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _is_private_chat(update: Update) -> bool:
+        chat = update.effective_chat
+        return bool(chat and chat.type == "private")
+
+    async def _require_private_chat(self, update: Update) -> bool:
+        if self._is_private_chat(update):
+            return True
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                "Этот бот работает только в личных сообщениях. Напиши ему в приват."
+            )
+        return False
 
     async def close(self) -> None:
         if self._session_cleanup_task and not self._session_cleanup_task.done():
@@ -124,6 +144,8 @@ class VideoBot:
 
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._require_private_chat(update):
+            return ConversationHandler.END
         await update.message.reply_text(
             "👋 Привет! Я бот для создания видео-эдитов.\n\n"
             "Что я умею:\n"
@@ -134,13 +156,9 @@ class VideoBot:
         )
 
     async def cmd_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-
-        if len(self._sessions) >= MAX_ACTIVE_SESSIONS and user_id not in self._sessions:
-            await update.message.reply_text(
-                "Сейчас слишком много активных сессий. Попробуй ещё раз чуть позже."
-            )
+        if not await self._require_private_chat(update):
             return ConversationHandler.END
+        user_id = update.effective_user.id
 
         remaining = await self._usage_limiter.get_remaining(
             user_id,
@@ -164,9 +182,19 @@ class VideoBot:
                 )
             return ConversationHandler.END
 
+        if not self._runtime.try_register_session(user_id, MAX_ACTIVE_SESSIONS, SESSION_RUNTIME_TTL_SEC):
+            await update.message.reply_text(
+                "Сейчас слишком много активных сессий. Попробуй ещё раз чуть позже."
+            )
+            return ConversationHandler.END
+
         self._drop_session(user_id)
-        session = self._create_session(user_id, update.effective_chat.id)
-        self._touch_session(session)
+        try:
+            session = self._create_session(user_id, update.effective_chat.id)
+        except Exception:
+            self._runtime.unregister_session(user_id)
+            raise
+        self._touch_session(user_id, session)
 
         await update.message.reply_text(
             "🎬 Начинаем!\n\n"
@@ -177,9 +205,11 @@ class VideoBot:
         return WAIT_AUDIO
 
     async def cmd_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._require_private_chat(update):
+            return ConversationHandler.END
         user_id = update.effective_user.id
         session = self._get_session(user_id)
-        self._touch_session(session)
+        self._touch_session(user_id, session)
 
         if not session:
             await update.message.reply_text("Сначала запусти /run")
@@ -234,9 +264,11 @@ class VideoBot:
         return ConversationHandler.END
 
     async def cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._require_private_chat(update):
+            return ConversationHandler.END
         user_id = update.effective_user.id
         session = self._get_session(user_id)
-        self._touch_session(session)
+        self._touch_session(user_id, session)
 
         if not session:
             await update.message.reply_text("Нечего отменять. Начни с /run")
@@ -256,15 +288,17 @@ class VideoBot:
 
 
     async def receive_audio(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._require_private_chat(update):
+            return ConversationHandler.END
         user_id = update.effective_user.id
         session = self._get_session(user_id)
-        self._touch_session(session)
+        self._touch_session(user_id, session)
 
         if not session:
             await update.message.reply_text("Сессия не найдена. Начни с /run")
             return ConversationHandler.END
 
-        svc = VideoService(session.tmp_dir)
+        svc = VideoService(session.tmp_dir, user_id=user_id)
 
         try:
             audio_path = await svc.acquire_audio(update.message)
@@ -302,9 +336,11 @@ class VideoBot:
         return WAIT_VIDEO
 
     async def receive_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._require_private_chat(update):
+            return ConversationHandler.END
         user_id = update.effective_user.id
         session = self._get_session(user_id)
-        self._touch_session(session)
+        self._touch_session(user_id, session)
 
         if not session:
             await update.message.reply_text("Сессия не найдена. Начни с /run")
@@ -317,7 +353,7 @@ class VideoBot:
             )
             return WAIT_VIDEO
 
-        svc = VideoService(session.tmp_dir)
+        svc = VideoService(session.tmp_dir, user_id=user_id)
         idx = len(session.video_files)
 
         try:
@@ -378,6 +414,8 @@ class VideoBot:
     async def fallback_start_hint(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message:
             return
+        if not self._is_private_chat(update):
+            return
         await update.message.reply_text(
             "Привет! 👋 Нажми /start чтобы узнать как я работаю, или /run чтобы сразу начать."
         )
@@ -403,13 +441,21 @@ class VideoBot:
         )
 
         try:
+            pipeline_token = await self._runtime.acquire_pipeline_slot(
+                user_id,
+                limit=1,
+                ttl_sec=PIPELINE_SLOT_TTL_SEC,
+            )
             pipeline = PipelineService(
                 video_files=session.video_files,
                 audio_path=session.audio_path,
                 tmp_dir=session.tmp_dir,
                 output_path=output_path,
             )
-            await pipeline.run()
+            try:
+                await pipeline.run()
+            finally:
+                self._runtime.release_pipeline_slot(pipeline_token)
 
             if not output_path.exists() or output_path.stat().st_size == 0:
                 raise RuntimeError("Выходной файл не был создан или пустой")
