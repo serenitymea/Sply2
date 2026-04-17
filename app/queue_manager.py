@@ -22,6 +22,9 @@ class QueueManager:
         self._process_callback = callback
 
     def start(self) -> None:
+        if self._worker_task and not self._worker_task.done():
+            logger.warning("QueueManager worker is already running")
+            return
         self._worker_task = asyncio.create_task(self._worker())
         logger.info("QueueManager started")
 

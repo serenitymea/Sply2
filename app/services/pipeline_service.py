@@ -1,11 +1,10 @@
 import asyncio
 import logging
-import shutil
+import os
+import signal
+import subprocess
+import sys
 from pathlib import Path
-
-from clipmaker.analyzer import analyze_audio, analyze_video
-from clipmaker.selector import select_clips
-from clipmaker.renderer import render
 
 logger = logging.getLogger(__name__)
 
@@ -34,93 +33,103 @@ class PipelineService:
         self._max_clips = max_clips
         self._effects = effects
         self._sample_fps = sample_fps
+        self._process: asyncio.subprocess.Process | None = None
 
-    def _select_clips(self, audio):
-        if len(self._video_files) == 1:
-            video = analyze_video(self._video_files[0], sample_fps=self._sample_fps)
-            clips = select_clips(video, audio, max_clips=self._max_clips)
-            return clips, None
-        return self._run_multi_video(audio)
-
-    def _run_multi_video(self, audio):
-        n = len(self._video_files)
-        per_video = (self._max_clips or 40) // n + 1
-
-        all_clips: list = []
-        all_sources: list[str] = []
-
-        for i, vpath in enumerate(self._video_files):
-            logger.info(f"[Pipeline] Video {i + 1}/{n}: {vpath}")
-            video = analyze_video(vpath, sample_fps=self._sample_fps)
-            clips = select_clips(video, audio, max_clips=per_video)
-            all_clips.extend(clips)
-            all_sources.extend([vpath] * len(clips))
-
-        merged_clips: list = []
-        merged_sources: list[str] = []
-        groups = [
-            [(clip, source) for clip, source in zip(all_clips, all_sources) if source == video_path]
-            for video_path in self._video_files
+    def _build_cmd(self) -> list[str]:
+        cmd = [
+            sys.executable,
+            "-m",
+            "clipmaker.main",
+            *self._video_files,
+            "--music",
+            str(self._audio_path),
+            "--output",
+            str(self._output_path),
+            "--fps",
+            str(self._fps),
+            "--speed",
+            str(self._speed),
+            "--sample-fps",
+            str(self._sample_fps),
         ]
-        iters = [iter(group) for group in groups]
-        active = list(range(n))
-        while active:
-            next_active = []
-            for i in active:
+        if self._resolution:
+            cmd.extend(["--resolution", self._resolution])
+        if self._max_clips is not None:
+            cmd.extend(["--max-clips", str(self._max_clips)])
+        if self._effects:
+            cmd.append("--effects")
+        return cmd
+
+    async def _terminate_process_tree(self) -> None:
+        process = self._process
+        if not process or process.returncode is not None:
+            return
+
+        try:
+            if os.name == "nt":
+                kill_proc = await asyncio.create_subprocess_exec(
+                    "taskkill",
+                    "/PID",
+                    str(process.pid),
+                    "/T",
+                    "/F",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(kill_proc.communicate(), timeout=10)
+            else:
+                os.killpg(process.pid, signal.SIGTERM)
                 try:
-                    clip, source = next(iters[i])
-                    merged_clips.append(clip)
-                    merged_sources.append(source)
-                    next_active.append(i)
-                except StopIteration:
-                    pass
-            active = next_active
-
-        cap = self._max_clips or len(merged_clips)
-        return merged_clips[:cap], merged_sources[:cap]
-
-    def _run_blocking(self) -> None:
-        self._tmp_dir.mkdir(parents=True, exist_ok=True)
-        audio_path = self._tmp_dir / f"pipeline_audio{self._audio_path.suffix or '.bin'}"
-        audio_path.unlink(missing_ok=True)
-        shutil.copy(str(self._audio_path), str(audio_path))
-
-        pipeline_output = self._tmp_dir / "pipeline.mp4"
-
-        logger.info("[Pipeline] Analyzing audio & video")
-        audio = analyze_audio(str(audio_path))
-        clips, clip_sources = self._select_clips(audio)
-
-        logger.info(f"[Pipeline] Rendering {len(clips)} clip(s)")
-        render(
-            clips=clips,
-            video_source=self._video_files,
-            music_path=str(audio_path),
-            output_path=str(pipeline_output),
-            fps=self._fps,
-            speed=self._speed,
-            resolution=self._resolution,
-            effects=self._effects,
-            clip_sources=clip_sources,
-        )
-
-        if not pipeline_output.exists() or pipeline_output.stat().st_size == 0:
-            raise RuntimeError("Ошибка в pipeline: выходной файл не создан.")
-
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(pipeline_output), str(self._output_path))
-
-        if audio_path.exists():
-            audio_path.unlink(missing_ok=True)
-
-        if not self._output_path.exists() or self._output_path.stat().st_size == 0:
-            raise RuntimeError("Финальный файл не был создан. Проверь исходные видео и аудио.")
-
-        logger.info(
-            f"[Pipeline] Done -> {self._output_path} "
-            f"({self._output_path.stat().st_size // (1024 * 1024)} MB)"
-        )
+                    await asyncio.wait_for(process.wait(), timeout=10)
+                except asyncio.TimeoutError:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    await asyncio.wait_for(process.wait(), timeout=10)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.warning("[Pipeline] Failed to terminate process tree: %s", e)
+            process.kill()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except Exception:
+                pass
 
     async def run(self) -> None:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._run_blocking)
+        self._tmp_dir.mkdir(parents=True, exist_ok=True)
+        self._output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._output_path.unlink(missing_ok=True)
+
+        cmd = self._build_cmd()
+        logger.info("[Pipeline] Starting subprocess: %s", " ".join(cmd))
+
+        creationflags = 0
+        start_new_session = False
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            start_new_session = True
+
+        self._process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            creationflags=creationflags,
+            start_new_session=start_new_session,
+        )
+
+        try:
+            stdout, stderr = await self._process.communicate()
+        except asyncio.CancelledError:
+            logger.info("[Pipeline] Cancel requested, terminating subprocess")
+            await self._terminate_process_tree()
+            raise
+
+        if self._process.returncode != 0:
+            err_text = stderr.decode(errors="replace").strip()
+            out_text = stdout.decode(errors="replace").strip()
+            details = err_text or out_text or "clipmaker exited with an unknown error"
+            short_details = "\n".join([line for line in details.splitlines() if line.strip()][-10:])
+            raise RuntimeError(f"Pipeline failed:\n{short_details}")
+
+        if not self._output_path.exists() or self._output_path.stat().st_size == 0:
+            raise RuntimeError("Pipeline finished but the output file was not created.")

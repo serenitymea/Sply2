@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -106,7 +107,14 @@ class DailyUsageLimiter:
         }
 
     def _write_state(self, state: dict) -> None:
-        self._state_file.write_text(
-            json.dumps(state, ensure_ascii=True, indent=2),
+        self._state_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(state, ensure_ascii=True, indent=2)
+        with tempfile.NamedTemporaryFile(
+            "w",
             encoding="utf-8",
-        )
+            dir=self._state_file.parent,
+            delete=False,
+        ) as tmp:
+            tmp.write(payload)
+            tmp_path = Path(tmp.name)
+        os.replace(tmp_path, self._state_file)

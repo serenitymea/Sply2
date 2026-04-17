@@ -191,6 +191,12 @@ class VideoBot:
         remaining_hint = "" if remaining is None else f"\nОсталось генераций сегодня: {remaining}"
         session.done_called = True
         position = await self._queue.enqueue(user_id)
+        if position is None:
+            await self._usage_limiter.refund(
+                user_id,
+                is_admin=self._is_admin(user_id),
+            )
+            session.done_called = False
 
         if position is None:
             await update.message.reply_text("⏳ Уже в очереди, ожидай...")
