@@ -171,6 +171,12 @@ class VideoBot:
             )
             return ConversationHandler.END
 
+        remaining_hint = (
+            ""
+            if remaining is None
+            else f"\n\nОсталось генераций сегодня: {remaining} из {DAILY_GENERATION_LIMIT}"
+        )
+
         position = await self._queue.get_position(user_id)
         if position is not None:
             if position == 0:
@@ -201,6 +207,7 @@ class VideoBot:
             "🎵 Шаг 1 из 2: Отправь аудио файл или ссылку на музыку\n"
             "(TikTok)\n\n"
             "❌ Для отмены — /cancel"
+            f"{remaining_hint}"
         )
         return WAIT_AUDIO
 
@@ -237,7 +244,11 @@ class VideoBot:
             )
             return ConversationHandler.END
 
-        remaining_hint = "" if remaining is None else f"\nОсталось генераций сегодня: {remaining}"
+        remaining_hint = (
+            ""
+            if remaining is None
+            else f"\n\nОсталось генераций сегодня: {remaining} из {DAILY_GENERATION_LIMIT}"
+        )
         session.done_called = True
         position = await self._queue.enqueue(user_id)
         if position is None:
@@ -254,12 +265,14 @@ class VideoBot:
                 f"✅ Принято! {len(session.video_files)} видео + аудио\n\n"
                 "🚀 Очередь свободна, начинаю обработку прямо сейчас!\n"
                 "Это может занять несколько минут..."
+                f"{remaining_hint}"
             )
         else:
             await update.message.reply_text(
                 f"✅ Принято! {len(session.video_files)} видео + аудио\n\n"
                 f"⏳ Твоя позиция в очереди: {position}\n"
                 "Как только подойдёт очередь — сообщу и начну обработку."
+                f"{remaining_hint}"
             )
         return ConversationHandler.END
 
