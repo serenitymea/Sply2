@@ -31,6 +31,7 @@ async def main() -> None:
     try:
         await asyncio.Event().wait()
     finally:
+        await video_bot.close()
         await application.updater.stop()
         await application.stop()
         await application.shutdown()

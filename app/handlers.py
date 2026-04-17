@@ -89,25 +89,37 @@ class VideoBot:
         if session:
             shutil.rmtree(session.tmp_dir, ignore_errors=True)
 
+    async def close(self) -> None:
+        if self._session_cleanup_task and not self._session_cleanup_task.done():
+            self._session_cleanup_task.cancel()
+            try:
+                await self._session_cleanup_task
+            except asyncio.CancelledError:
+                pass
+
     async def _cleanup_expired_sessions_loop(self) -> None:
-        while True:
-            await asyncio.sleep(SESSION_CLEANUP_INTERVAL_SEC)
-            now = time.time()
-            expired_users = [
-                user_id
-                for user_id, session in self._sessions.items()
-                if not session.done_called and now - session.last_activity > SESSION_TTL_SEC
-            ]
-            for user_id in expired_users:
-                session = self._get_session(user_id)
-                if not session:
-                    continue
-                logger.info(f"[Session] EXPIRED user={user_id}")
-                await self._notify(
-                    session.chat_id,
-                    "Сессия истекла из-за бездействия. Начни заново с /run."
-                )
-                self._drop_session(user_id)
+        try:
+            while True:
+                await asyncio.sleep(SESSION_CLEANUP_INTERVAL_SEC)
+                now = time.time()
+                expired_users = [
+                    user_id
+                    for user_id, session in self._sessions.items()
+                    if not session.done_called and now - session.last_activity > SESSION_TTL_SEC
+                ]
+                for user_id in expired_users:
+                    session = self._get_session(user_id)
+                    if not session:
+                        continue
+                    logger.info(f"[Session] EXPIRED user={user_id}")
+                    await self._notify(
+                        session.chat_id,
+                        "Сессия истекла из-за бездействия. Начни заново с /run."
+                    )
+                    self._drop_session(user_id)
+        except asyncio.CancelledError:
+            logger.info("[Session] Cleanup loop stopped")
+            raise
 
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -373,6 +385,7 @@ class VideoBot:
         output_dir = ensure_output_root()
         output_path = output_dir / f"final_{user_id}_{int(time.time())}.mp4"
         start_time = time.monotonic()
+        delivered = False
 
         logger.info(f"[Process] START user={user_id} videos={len(session.video_files)}")
         await self._notify(
@@ -405,8 +418,22 @@ class VideoBot:
                     caption=f"🎬 Готово! Время обработки: {elapsed:.0f} сек.",
                     supports_streaming=True,
                 )
+            delivered = True
 
         except asyncio.CancelledError:
+            reason = await self._queue.pop_stop_reason(user_id)
+            if reason == "timeout":
+                elapsed = time.monotonic() - start_time
+                logger.error(f"[Process] TIMEOUT user={user_id} after {elapsed:.0f}s")
+                await self._notify(
+                    session.chat_id,
+                    "РџСЂРµРІС‹С€РµРЅРѕ РІСЂРµРјСЏ РѕР±СЂР°Р±РѕС‚РєРё (8 РјРёРЅСѓС‚).\n\n"
+                    "Р’РѕР·РјРѕР¶РЅС‹Рµ РїСЂРёС‡РёРЅС‹:\n"
+                    "вЂў РЎР»РёС€РєРѕРј Р±РѕР»СЊС€РёРµ РёР»Рё РґР»РёРЅРЅС‹Рµ РІРёРґРµРѕ\n"
+                    "вЂў Р’С‹СЃРѕРєР°СЏ РЅР°РіСЂСѓР·РєР° РЅР° СЃРµСЂРІРµСЂ\n\n"
+                    "РџРѕРїСЂРѕР±СѓР№ СЃ Р±РѕР»РµРµ РєРѕСЂРѕС‚РєРёРјРё РєР»РёРїР°РјРё РёР»Рё РїРѕР·Р¶Рµ. /run"
+                )
+                raise
             logger.info(f"[Process] CANCELLED user={user_id}")
             await self._notify(
                 session.chat_id,
@@ -434,7 +461,7 @@ class VideoBot:
             )
         finally:
             self._drop_session(user_id)
-            if output_path.exists():
+            if delivered and output_path.exists():
                 output_path.unlink(missing_ok=True)
 
 

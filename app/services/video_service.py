@@ -51,6 +51,14 @@ def _check_size(file_obj) -> None:
         raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 20 MB.")
 
 
+def _check_downloaded_size(path: Path) -> None:
+    size = path.stat().st_size
+    if size > MAX_FILE_SIZE_BYTES:
+        mb = size // (1024 * 1024)
+        path.unlink(missing_ok=True)
+        raise ValueError(f"Р¤Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ ({mb} MB). РњР°РєСЃРёРјСѓРј - 20 MB.")
+
+
 def _guess_suffix(file_obj, default: str) -> str:
     file_name = getattr(file_obj, "file_name", "") or ""
     suffix = Path(file_name).suffix.lower()
@@ -137,6 +145,8 @@ class VideoService:
             if not raw_path.exists() or raw_path.stat().st_size == 0:
                 raise ValueError("Не удалось получить файл от Telegram. Попробуй ещё раз.")
 
+            _check_downloaded_size(raw_path)
+
             try:
                 await self._ffmpeg.to_mp3(str(raw_path), str(audio_path))
                 raw_path.unlink(missing_ok=True)
@@ -187,6 +197,8 @@ class VideoService:
 
         if not raw_path.exists() or raw_path.stat().st_size == 0:
             raise ValueError("Не удалось получить файл от Telegram. Попробуй ещё раз.")
+
+        _check_downloaded_size(raw_path)
 
         try:
             await self._ffmpeg.to_mp4(str(raw_path), str(video_path))

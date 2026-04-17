@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 PROCESSING_TIMEOUT = 500
 CancelResult = Literal["queued", "active", "missing"]
+StopReason = Literal["cancelled", "timeout"]
 
 
 class QueueManager:
@@ -17,6 +18,7 @@ class QueueManager:
         self._process_callback = process_callback
         self._worker_task: Optional[asyncio.Task] = None
         self._current_process_task: Optional[asyncio.Task] = None
+        self._stop_reasons: dict[int, StopReason] = {}
 
     def set_process_callback(self, callback: Callable[[int], Awaitable[None]]) -> None:
         self._process_callback = callback
@@ -48,6 +50,7 @@ class QueueManager:
         async with self._lock:
             if user_id == self._active_user:
                 if self._current_process_task and not self._current_process_task.done():
+                    self._stop_reasons[user_id] = "cancelled"
                     self._current_process_task.cancel()
                 return "active"
 
@@ -69,6 +72,10 @@ class QueueManager:
                     await self._queue.put(uid)
 
             return "queued"
+
+    async def pop_stop_reason(self, user_id: int) -> Optional[StopReason]:
+        async with self._lock:
+            return self._stop_reasons.pop(user_id, None)
 
     @property
     def active_user(self) -> Optional[int]:
@@ -101,6 +108,8 @@ class QueueManager:
                         timeout=PROCESSING_TIMEOUT,
                     )
             except asyncio.TimeoutError:
+                async with self._lock:
+                    self._stop_reasons[user_id] = "timeout"
                 logger.error(f"[Queue] TIMEOUT user={user_id}")
             except asyncio.CancelledError:
                 logger.info(f"[Queue] CANCELLED user={user_id}")
