@@ -76,7 +76,9 @@ class MediaDownloader:
     @staticmethod
     def _audio_opts() -> dict:
         return {
-            "format": "bestaudio",
+            # TikTok often exposes only muxed formats, so we fall back to `best`
+            # and let FFmpegExtractAudio pull out the audio track.
+            "format": "bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",

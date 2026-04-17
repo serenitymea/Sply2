@@ -1,0 +1,15 @@
+[build]
+builder = "DOCKERFILE"
+watchPatterns = [
+  "/app/**",
+  "/clipmaker/**",
+  "/run_bot.py",
+  "/requirements.txt",
+  "/pyproject.toml",
+  "/Dockerfile"
+]
+
+[deploy]
+startCommand = "python run_bot.py"
+restartPolicyType = "ALWAYS"
+restartPolicyMaxRetries = 10

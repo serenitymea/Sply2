@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 WAIT_AUDIO, WAIT_VIDEO = range(2)
 
 PROCESSING_TIMEOUT = 500
+SESSION_TTL_SEC = 10 * 60
+SESSION_CLEANUP_INTERVAL_SEC = 60
 
 
 @dataclass
@@ -33,6 +35,7 @@ class UserSession:
     video_files: list[str] = field(default_factory=list)
     total_video_duration: float = 0.0
     done_called: bool = False
+    last_activity: float = field(default_factory=time.time)
 
 
 class VideoBot:
@@ -44,6 +47,7 @@ class VideoBot:
         self._usage_limiter = DailyUsageLimiter()
         self._queue.set_process_callback(self._process_user)
         self._cleanup_stale_tmp()
+        self._session_cleanup_task = asyncio.create_task(self._cleanup_expired_sessions_loop())
 
     @staticmethod
     def _cleanup_stale_tmp() -> None:
@@ -69,6 +73,10 @@ class VideoBot:
     def _is_admin(self, user_id: int) -> bool:
         return user_id in self._admin_ids
 
+    def _touch_session(self, session: UserSession | None) -> None:
+        if session:
+            session.last_activity = time.time()
+
     def _create_session(self, user_id: int, chat_id: int) -> UserSession:
         tmp_dir = ensure_tmp_root() / f"vbot_{user_id}_{int(time.time() * 1000)}"
         tmp_dir.mkdir(parents=True, exist_ok=False)
@@ -80,6 +88,26 @@ class VideoBot:
         session = self._sessions.pop(user_id, None)
         if session:
             shutil.rmtree(session.tmp_dir, ignore_errors=True)
+
+    async def _cleanup_expired_sessions_loop(self) -> None:
+        while True:
+            await asyncio.sleep(SESSION_CLEANUP_INTERVAL_SEC)
+            now = time.time()
+            expired_users = [
+                user_id
+                for user_id, session in self._sessions.items()
+                if not session.done_called and now - session.last_activity > SESSION_TTL_SEC
+            ]
+            for user_id in expired_users:
+                session = self._get_session(user_id)
+                if not session:
+                    continue
+                logger.info(f"[Session] EXPIRED user={user_id}")
+                await self._notify(
+                    session.chat_id,
+                    "Сессия истекла из-за бездействия. Начни заново с /run."
+                )
+                self._drop_session(user_id)
 
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -118,7 +146,8 @@ class VideoBot:
             return ConversationHandler.END
 
         self._drop_session(user_id)
-        self._create_session(user_id, update.effective_chat.id)
+        session = self._create_session(user_id, update.effective_chat.id)
+        self._touch_session(session)
 
         await update.message.reply_text(
             "🎬 Начинаем!\n\n"
@@ -131,6 +160,7 @@ class VideoBot:
     async def cmd_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         session = self._get_session(user_id)
+        self._touch_session(session)
 
         if not session:
             await update.message.reply_text("Сначала запусти /run")
@@ -181,6 +211,7 @@ class VideoBot:
     async def cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         session = self._get_session(user_id)
+        self._touch_session(session)
 
         if not session:
             await update.message.reply_text("Нечего отменять. Начни с /run")
@@ -202,6 +233,7 @@ class VideoBot:
     async def receive_audio(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         session = self._get_session(user_id)
+        self._touch_session(session)
 
         if not session:
             await update.message.reply_text("Сессия не найдена. Начни с /run")
@@ -247,6 +279,7 @@ class VideoBot:
     async def receive_video(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         session = self._get_session(user_id)
+        self._touch_session(session)
 
         if not session:
             await update.message.reply_text("Сессия не найдена. Начни с /run")
