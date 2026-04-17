@@ -52,7 +52,7 @@ def _check_size(file_obj) -> None:
     size = getattr(file_obj, "file_size", None)
     if size and size > MAX_FILE_SIZE_BYTES:
         mb = size // (1024 * 1024)
-        raise ValueError(f"Р¤Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ ({mb} MB). РњР°РєСЃРёРјСѓРј - 20 MB.")
+        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 20 MB.")
 
 
 def _check_downloaded_size(path: Path) -> None:
@@ -60,7 +60,7 @@ def _check_downloaded_size(path: Path) -> None:
     if size > MAX_FILE_SIZE_BYTES:
         mb = size // (1024 * 1024)
         path.unlink(missing_ok=True)
-        raise ValueError(f"Р В¤Р В°Р в„–Р В» РЎРѓР В»Р С‘РЎв‚¬Р С”Р С•Р С Р В±Р С•Р В»РЎРЉРЎв‚¬Р С•Р в„– ({mb} MB). Р СљР В°Р С”РЎРѓР С‘Р СРЎС“Р С - 20 MB.")
+        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 20 MB.")
 
 
 def _guess_suffix(file_obj, default: str) -> str:
@@ -93,16 +93,16 @@ async def get_video_duration(video_path: Path) -> float:
         if not raw:
             err = stderr.decode(errors="replace").strip()
             logger.error(f"ffprobe returned empty output for {video_path}: {err}")
-            raise RuntimeError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ РІРёРґРµРѕ. РџРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№ С„Р°Р№Р».")
+            raise RuntimeError("Не удалось определить длительность видео. Попробуй другой файл.")
         return float(raw)
     except (asyncio.TimeoutError, FileNotFoundError) as e:
         logger.error(f"ffprobe failed for {video_path}: {e}")
-        raise RuntimeError("РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ РІРёРґРµРѕ. РЈР±РµРґРёСЃСЊ, С‡С‚Рѕ ffprobe СѓСЃС‚Р°РЅРѕРІР»РµРЅ.")
+        raise RuntimeError("Не удалось проверить длительность видео. Убедись, что ffprobe установлен.")
     except RuntimeError:
         raise
     except Exception as e:
         logger.error(f"ffprobe unexpected error for {video_path}: {e}")
-        raise RuntimeError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ РІРёРґРµРѕ. РџРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№ С„Р°Р№Р».")
+        raise RuntimeError("Не удалось определить длительность видео. Попробуй другой файл.")
 
 
 class VideoService:
@@ -129,7 +129,7 @@ class VideoService:
         audio_path = self._tmp_dir / "m1.mp3"
 
         if msg.text and _is_url(msg.text):
-            await msg.reply_text("вЏ¬ РЎРєР°С‡РёРІР°СЋ Р°СѓРґРёРѕ РїРѕ СЃСЃС‹Р»РєРµ... Р­С‚Рѕ РјРѕР¶РµС‚ Р·Р°РЅСЏС‚СЊ РґРѕ РЅРµСЃРєРѕР»СЊРєРёС… РјРёРЅСѓС‚.")
+            await msg.reply_text("🎬 Скачиваю аудио по ссылке... Это может занять до нескольких минут.")
             async with self._preprocess_slot():
                 downloaded = await self._downloader.download(msg.text.strip())
                 _check_downloaded_size(downloaded)
@@ -147,12 +147,12 @@ class VideoService:
 
             if not file_obj:
                 raise ValueError(
-                    "РќРµРїРѕРґРґРµСЂР¶РёРІР°РµРјС‹Р№ С„РѕСЂРјР°С‚ РґРѕРєСѓРјРµРЅС‚Р°.\n"
-                    "РџРѕРґРґРµСЂР¶РёРІР°СЋС‚СЃСЏ: mp3, wav, ogg, flac, m4a\n"
+                    "Неподдерживаемый формат документа.\n"
+                    "Поддерживаются: mp3, wav, ogg, flac, m4a\n"
                 )
 
             _check_size(file_obj)
-            await msg.reply_text("вЏ¬ РџРѕР»СѓС‡Р°СЋ Р°СѓРґРёРѕ С„Р°Р№Р»...")
+            await msg.reply_text("🎬 Получаю аудио файл...")
 
             raw_path = self._tmp_dir / f"audio_raw{_guess_suffix(file_obj, '.bin')}"
             raw_path.unlink(missing_ok=True)
@@ -162,10 +162,10 @@ class VideoService:
                 try:
                     await _download_tg_file(file_obj, raw_path)
                 except asyncio.TimeoutError:
-                    raise asyncio.TimeoutError("Р—Р°РіСЂСѓР·РєР° С„Р°Р№Р»Р° Р·Р°РЅСЏР»Р° СЃР»РёС€РєРѕРј РґРѕР»РіРѕ.")
+                    raise asyncio.TimeoutError("Загрузка файла заняла слишком долго.")
 
                 if not raw_path.exists() or raw_path.stat().st_size == 0:
-                    raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ С„Р°Р№Р» РѕС‚ Telegram. РџРѕРїСЂРѕР±СѓР№ РµС‰С‘ СЂР°Р·.")
+                    raise ValueError("Не удалось получить файл от Telegram. Попробуй ещё раз.")
 
                 _check_downloaded_size(raw_path)
 
@@ -177,12 +177,10 @@ class VideoService:
                     logger.warning("ffmpeg audio conversion failed, using original file: %s", e)
                     final_path = raw_path
         else:
-            raise ValueError(
-                "РћС‚РїСЂР°РІСЊ Р°СѓРґРёРѕ С„Р°Р№Р» (mp3, wav, ogg) РёР»Рё СЃСЃС‹Р»РєСѓ РЅР° РјСѓР·С‹РєСѓ"
-            )
+            raise ValueError("Отправь аудио файл (mp3, wav, ogg) или ссылку на музыку")
 
         if not final_path.exists() or final_path.stat().st_size == 0:
-            raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ Р°СѓРґРёРѕ С„Р°Р№Р». РџРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№.")
+            raise ValueError("Не удалось обработать аудио файл. Попробуй другой.")
 
         logger.info(f"Audio ready: {final_path} ({final_path.stat().st_size // 1024} KB)")
         return final_path
@@ -202,12 +200,12 @@ class VideoService:
 
         if not file_obj:
             raise ValueError(
-                "РќРµРїРѕРґРґРµСЂР¶РёРІР°РµРјС‹Р№ С„РѕСЂРјР°С‚.\n"
-                "РџРѕРґРґРµСЂР¶РёРІР°СЋС‚СЃСЏ: mp4, mov, mkv, avi, webm"
+                "Неподдерживаемый формат.\n"
+                "Поддерживаются: mp4, mov, mkv, avi, webm"
             )
 
         _check_size(file_obj)
-        await msg.reply_text(f"вЏ¬ РџРѕР»СѓС‡Р°СЋ РІРёРґРµРѕ #{idx + 1}...")
+        await msg.reply_text(f"🎬 Получаю видео #{idx + 1}...")
 
         raw_path = self._tmp_dir / f"video_raw_{idx}{_guess_suffix(file_obj, '.bin')}"
         raw_path.unlink(missing_ok=True)
@@ -217,10 +215,10 @@ class VideoService:
             try:
                 await _download_tg_file(file_obj, raw_path)
             except asyncio.TimeoutError:
-                raise asyncio.TimeoutError("Р—Р°РіСЂСѓР·РєР° РІРёРґРµРѕ Р·Р°РЅСЏР»Р° СЃР»РёС€РєРѕРј РґРѕР»РіРѕ. РџРѕРїСЂРѕР±СѓР№ С„Р°Р№Р» РїРѕРјРµРЅСЊС€Рµ.")
+                raise asyncio.TimeoutError("Загрузка видео заняла слишком долго. Попробуй файл поменьше.")
 
             if not raw_path.exists() or raw_path.stat().st_size == 0:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ С„Р°Р№Р» РѕС‚ Telegram. РџРѕРїСЂРѕР±СѓР№ РµС‰С‘ СЂР°Р·.")
+                raise ValueError("Не удалось получить файл от Telegram. Попробуй ещё раз.")
 
             _check_downloaded_size(raw_path)
 
@@ -233,7 +231,7 @@ class VideoService:
                 final_path = raw_path
 
             if not final_path.exists() or final_path.stat().st_size == 0:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ РІРёРґРµРѕ С„Р°Р№Р». РџРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№.")
+                raise ValueError("Не удалось обработать видео файл. Попробуй другой.")
 
             duration = await get_video_duration(final_path)
 
@@ -245,10 +243,10 @@ class VideoService:
             clip_min = int(duration) // 60
             clip_sec = int(duration) % 60
             raise ValueError(
-                f"РЎСѓРјРјР°СЂРЅР°СЏ РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ РІРёРґРµРѕ РїСЂРµРІС‹СЃРёС‚ Р»РёРјРёС‚ 10 РјРёРЅСѓС‚.\n"
-                f"РЈР¶Рµ РґРѕР±Р°РІР»РµРЅРѕ: {current_min}Рј {current_sec}СЃ, "
-                f"СЌС‚РѕС‚ РєР»РёРї: {clip_min}Рј {clip_sec}СЃ.\n"
-                f"РћС‚РїСЂР°РІСЊ РІРёРґРµРѕ РїРѕРєРѕСЂРѕС‡Рµ РёР»Рё РЅР°С‡РЅРё РѕР±СЂР°Р±РѕС‚РєСѓ СЃ /done."
+                f"Суммарная длительность видео превысит лимит 10 минут.\n"
+                f"Уже добавлено: {current_min}м {current_sec}с, "
+                f"этот клип: {clip_min}м {clip_sec}с.\n"
+                f"Отправь видео покороче или начни обработку с /done."
             )
 
         logger.info(f"Video ready: {final_path} ({final_path.stat().st_size // (1024 * 1024)} MB, {duration:.1f}s)")
