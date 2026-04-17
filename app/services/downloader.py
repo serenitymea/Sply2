@@ -6,6 +6,7 @@ import re
 import socket
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 import yt_dlp
 
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 300
 ALLOWED_URL_ROOT = "tiktok.com"
+_TIKTOK_MUSIC_PATH_RE = re.compile(r"^/music/[\w\.-]+-\d+/?$", re.IGNORECASE)
+_TIKTOK_VIDEO_PATH_RE = re.compile(r"^/@[^/]+/video/\d+/?$", re.IGNORECASE)
+_TIKTOK_SHORTLINK_HOSTS = {"vt.tiktok.com", "vm.tiktok.com"}
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -44,7 +48,7 @@ def _classify_error(err: str) -> str:
 class _YtdlpLogger:
     def warning(self, msg): logger.debug("[yt-dlp] %s", msg)
     def error(self, msg):   logger.error("[yt-dlp] %s", msg)
-    def debug(self, msg):   pass
+    def debug(self, msg):   logger.debug("[yt-dlp] %s", msg)
 
 
 class MediaDownloader:
@@ -80,9 +84,9 @@ class MediaDownloader:
     @staticmethod
     def _audio_opts() -> dict:
         return {
-            # TikTok often exposes only muxed formats, so we fall back to `best`
-            # and let FFmpegExtractAudio pull out the audio track.
-            "format": "bestaudio/best",
+            # Prefer TikTok's dedicated music track when it is exposed.
+            # If it is unavailable, fall back to the best available audio.
+            "format": "bestaudio[format_note*=Music]/bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -98,17 +102,37 @@ class MediaDownloader:
             },
         }
 
+    def _apply_runtime_overrides(self, opts: dict) -> dict:
+        merged = dict(opts)
+        if proxy := os.environ.get("YT_DLP_PROXY", ""):
+            merged["proxy"] = proxy
+        if cookie_file := self._find_cookies():
+            merged["cookiefile"] = cookie_file
+        return merged
+
+    def _build_probe_opts(self) -> dict:
+        return self._apply_runtime_overrides({
+            **self._base_opts(),
+            **self._extractor_opts(),
+            "skip_download": True,
+            "noplaylist": False,
+            "extract_flat": True,
+        })
+
     def _build_opts(self) -> dict:
-        opts = {
+        return self._apply_runtime_overrides({
             **self._base_opts(),
             **self._audio_opts(),
             **self._extractor_opts(),
+        })
+
+    def _build_music_page_opts(self) -> dict:
+        return {
+            **self._build_opts(),
+            "noplaylist": False,
+            "playlist_items": "1",
+            "lazy_playlist": True,
         }
-        if proxy := os.environ.get("YT_DLP_PROXY", ""):
-            opts["proxy"] = proxy
-        if cookie_file := self._find_cookies():
-            opts["cookiefile"] = cookie_file
-        return opts
 
     @staticmethod
     def _validate_url(url: str) -> str:
@@ -154,6 +178,112 @@ class MediaDownloader:
 
         return normalized
 
+    @staticmethod
+    def _is_music_url(url: str) -> bool:
+        parsed = urlparse(url)
+        return bool(parsed.hostname) and _TIKTOK_MUSIC_PATH_RE.match(parsed.path or "") is not None
+
+    @staticmethod
+    def _is_video_url(url: str) -> bool:
+        parsed = urlparse(url)
+        return bool(parsed.hostname) and _TIKTOK_VIDEO_PATH_RE.match(parsed.path or "") is not None
+
+    @staticmethod
+    def _needs_resolution(url: str) -> bool:
+        parsed = urlparse(url)
+        return (
+            parsed.hostname in _TIKTOK_SHORTLINK_HOSTS
+            or MediaDownloader._is_music_url(url)
+            or not MediaDownloader._is_video_url(url)
+        )
+
+    @staticmethod
+    def _pick_entry_url(info: dict) -> str | None:
+        candidates = [
+            info.get("webpage_url"),
+            info.get("original_url"),
+            info.get("url") if isinstance(info.get("url"), str) and info.get("url", "").startswith(("http://", "https://")) else None,
+        ]
+        for candidate in candidates:
+            if candidate:
+                return candidate
+        return None
+
+    def _probe_info(self, url: str) -> dict:
+        with yt_dlp.YoutubeDL(self._build_probe_opts()) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info:
+            raise ValueError("Не удалось получить данные TikTok по ссылке.")
+        return info
+
+    def _expand_short_url(self, url: str) -> str:
+        parsed = urlparse(url)
+        if parsed.hostname not in _TIKTOK_SHORTLINK_HOSTS:
+            return url
+
+        headers = self._base_opts()["http_headers"]
+        handlers = [HTTPRedirectHandler()]
+        if proxy := os.environ.get("YT_DLP_PROXY", ""):
+            handlers.append(ProxyHandler({"http": proxy, "https": proxy}))
+        opener = build_opener(*handlers)
+
+        for method in ("HEAD", "GET"):
+            try:
+                request = Request(url, headers=headers, method=method)
+                with opener.open(request, timeout=15) as response:
+                    final_url = response.geturl() or url
+                if final_url and final_url != url:
+                    logger.info("Expanded TikTok short URL: %s -> %s", url, final_url)
+                    return final_url
+            except Exception as exc:
+                logger.debug("Failed to expand short TikTok URL via %s: %s", method, exc)
+
+        return url
+
+    @staticmethod
+    def _select_download_target(info: dict) -> dict:
+        requested = info.get("requested_downloads") or []
+        for item in requested:
+            if item:
+                return item
+
+        entries = info.get("entries") or []
+        for entry in entries:
+            if entry:
+                nested_requested = entry.get("requested_downloads") or []
+                for item in nested_requested:
+                    if item:
+                        return item
+                return entry
+
+        return info
+
+    def _resolve_music_target_url(self, url: str, max_depth: int = 3) -> str:
+        if max_depth <= 0:
+            raise ValueError("Не удалось определить прямую ссылку на трек TikTok.")
+
+        info = self._probe_info(url)
+
+        direct_url = self._pick_entry_url(info)
+        if direct_url:
+            if self._needs_resolution(direct_url) and direct_url != url:
+                return self._resolve_music_target_url(direct_url, max_depth=max_depth - 1)
+            return direct_url
+
+        entries = info.get("entries") or []
+        for entry in entries:
+            if not entry:
+                continue
+            target_url = self._pick_entry_url(entry)
+            if not target_url:
+                continue
+            if self._needs_resolution(target_url) and target_url != url:
+                return self._resolve_music_target_url(target_url, max_depth=max_depth - 1)
+            if target_url:
+                return target_url
+
+        raise ValueError("Не удалось найти ролик для этого трека TikTok.")
+
     # ------------------------------------------------------------------
     # Cookie discovery
     # ------------------------------------------------------------------
@@ -179,7 +309,8 @@ class MediaDownloader:
 
     def _resolve_filename(self, info: dict, ydl: yt_dlp.YoutubeDL) -> Path:
         """Return the path of the downloaded mp3, falling back to the newest file."""
-        filename = Path(ydl.prepare_filename(info)).with_suffix(".mp3")
+        target_info = self._select_download_target(info)
+        filename = Path(ydl.prepare_filename(target_info)).with_suffix(".mp3")
         if filename.exists():
             return filename
 
@@ -188,22 +319,40 @@ class MediaDownloader:
             raise ValueError("Файл не был создан. Попробуй другую ссылку.")
         return max(files, key=lambda p: p.stat().st_mtime)
 
+    def _download_with_opts(self, url: str, opts: dict) -> tuple[dict, Path]:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if not info:
+                raise RuntimeError("empty info")
+            filename = self._resolve_filename(info, ydl)
+        return info, filename
+
     def _download_blocking(self, url: str) -> Path:
         try:
             safe_url = self._validate_url(url)
-            with yt_dlp.YoutubeDL(self._build_opts()) as ydl:
-                info = ydl.extract_info(safe_url, download=True)
-                if not info:
-                    raise RuntimeError("empty info")
-                filename = self._resolve_filename(info, ydl)
+            safe_url = self._expand_short_url(safe_url)
+            safe_url = self._validate_url(safe_url)
+            if self._is_music_url(safe_url):
+                try:
+                    _, filename = self._download_with_opts(safe_url, self._build_music_page_opts())
+                except (yt_dlp.utils.DownloadError, ValueError, RuntimeError):
+                    resolved_url = self._resolve_music_target_url(safe_url)
+                    _, filename = self._download_with_opts(resolved_url, self._build_opts())
+            else:
+                if self._needs_resolution(safe_url):
+                    safe_url = self._resolve_music_target_url(safe_url)
+                _, filename = self._download_with_opts(safe_url, self._build_opts())
 
         except yt_dlp.utils.DownloadError as e:
-            raise ValueError(_classify_error(_clean(str(e)).lower()))
+            raw_error = _clean(str(e))
+            logger.error("yt-dlp download failed for %s: %s", url, raw_error)
+            raise ValueError(_classify_error(raw_error.lower()))
 
         except ValueError:
             raise
 
-        except Exception:
+        except Exception as e:
+            logger.exception("Unexpected downloader error for %s: %s", url, e)
             raise ValueError(_DEFAULT_ERROR)
 
         if filename.stat().st_size == 0:

@@ -204,7 +204,7 @@ class VideoBot:
 
         await update.message.reply_text(
             "🎬 Начинаем!\n\n"
-            "🎵 Шаг 1 из 2: Отправь аудио файл или ссылку на музыку\n"
+            "🎵 Шаг 1 из 2: Отправь аудио файл или ссылку на видео с музыкой\n"
             "(TikTok)\n\n"
             "❌ Для отмены — /cancel"
             f"{remaining_hint}"
