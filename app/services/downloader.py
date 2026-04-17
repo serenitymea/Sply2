@@ -1,14 +1,24 @@
 import asyncio
+import ipaddress
 import logging
 import os
 import re
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yt_dlp
 
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_TIMEOUT = 300
+ALLOWED_URL_HOSTS = {
+    "tiktok.com",
+    "www.tiktok.com",
+    "m.tiktok.com",
+    "vm.tiktok.com",
+    "vt.tiktok.com",
+}
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -106,6 +116,50 @@ class MediaDownloader:
             opts["cookiefile"] = cookie_file
         return opts
 
+    @staticmethod
+    def _validate_url(url: str) -> str:
+        normalized = url.strip()
+        if normalized.lower().startswith("www."):
+            normalized = f"https://{normalized}"
+
+        parsed = urlparse(normalized)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("Поддерживаются только http/https ссылки на TikTok.")
+
+        host = (parsed.hostname or "").rstrip(".").lower()
+        if not host:
+            raise ValueError("Не удалось распознать адрес ссылки.")
+
+        if host not in ALLOWED_URL_HOSTS:
+            raise ValueError("Сейчас поддерживаются только ссылки TikTok.")
+
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            ip = None
+
+        if ip is not None:
+            raise ValueError("Ссылки по прямому IP-адресу запрещены.")
+
+        try:
+            addrinfo = socket.getaddrinfo(host, None)
+        except socket.gaierror:
+            raise ValueError("Не удалось проверить адрес ссылки. Попробуй другую ссылку.")
+
+        for entry in addrinfo:
+            resolved_ip = ipaddress.ip_address(entry[4][0])
+            if (
+                resolved_ip.is_private
+                or resolved_ip.is_loopback
+                or resolved_ip.is_link_local
+                or resolved_ip.is_multicast
+                or resolved_ip.is_reserved
+                or resolved_ip.is_unspecified
+            ):
+                raise ValueError("Небезопасный адрес ссылки заблокирован.")
+
+        return normalized
+
     # ------------------------------------------------------------------
     # Cookie discovery
     # ------------------------------------------------------------------
@@ -142,8 +196,9 @@ class MediaDownloader:
 
     def _download_blocking(self, url: str) -> Path:
         try:
+            safe_url = self._validate_url(url)
             with yt_dlp.YoutubeDL(self._build_opts()) as ydl:
-                info = ydl.extract_info(url, download=True)
+                info = ydl.extract_info(safe_url, download=True)
                 if not info:
                     raise RuntimeError("empty info")
                 filename = self._resolve_filename(info, ydl)

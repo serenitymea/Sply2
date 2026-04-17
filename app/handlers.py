@@ -25,6 +25,7 @@ WAIT_AUDIO, WAIT_VIDEO = range(2)
 PROCESSING_TIMEOUT = 500
 SESSION_TTL_SEC = 10 * 60
 SESSION_CLEANUP_INTERVAL_SEC = 60
+MAX_ACTIVE_SESSIONS = 20
 
 
 @dataclass
@@ -134,6 +135,12 @@ class VideoBot:
 
     async def cmd_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
+
+        if len(self._sessions) >= MAX_ACTIVE_SESSIONS and user_id not in self._sessions:
+            await update.message.reply_text(
+                "Сейчас слишком много активных сессий. Попробуй ещё раз чуть позже."
+            )
+            return ConversationHandler.END
 
         remaining = await self._usage_limiter.get_remaining(
             user_id,
@@ -461,7 +468,7 @@ class VideoBot:
             )
         finally:
             self._drop_session(user_id)
-            if delivered and output_path.exists():
+            if output_path.exists():
                 output_path.unlink(missing_ok=True)
 
 

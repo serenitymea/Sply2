@@ -11,6 +11,10 @@ import librosa
 import numpy as np
 from dataclasses import dataclass, field
 
+MAX_ANALYSIS_DURATION_SEC = 10 * 60 + 5
+MAX_ANALYSIS_FRAMES = 300_000
+MAX_ANALYSIS_FPS = 240.0
+
 # Data classes
 
 @dataclass
@@ -57,6 +61,16 @@ def analyze_video(video_path: str, sample_fps: float = 4.0) -> VideoFeatures:
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration = total / fps if fps > 0 else 0.0
+
+    if fps <= 0 or fps > MAX_ANALYSIS_FPS:
+        cap.release()
+        raise ValueError(f"Suspicious video FPS: {fps}")
+    if total <= 0 or total > MAX_ANALYSIS_FRAMES:
+        cap.release()
+        raise ValueError(f"Suspicious frame count: {total}")
+    if duration <= 0 or duration > MAX_ANALYSIS_DURATION_SEC:
+        cap.release()
+        raise ValueError(f"Video duration is too large for analysis: {duration:.1f}s")
 
     print(f"[analyzer] fps={fps:.2f}, frames={total}, duration={duration:.1f}s")
 

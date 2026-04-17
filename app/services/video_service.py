@@ -113,6 +113,7 @@ class VideoService:
         if msg.text and _is_url(msg.text):
             await msg.reply_text("⏬ Скачиваю аудио по ссылке... Это может занять до нескольких минут.")
             downloaded = await self._downloader.download(msg.text.strip())
+            _check_downloaded_size(downloaded)
             audio_path.unlink(missing_ok=True)
             shutil.copy(downloaded, audio_path)
             final_path = audio_path
