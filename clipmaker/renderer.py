@@ -2,7 +2,6 @@
 renderer.py — builds ffmpeg filter_complex and renders the final video
 
 one or more source video files
-basic visual effects (optional)
 automatic resolution selection
 clip playback speed (speed)
 """
@@ -39,7 +38,6 @@ def render(
     fps: int = 30,
     speed: float = 1.0,
     resolution: Optional[str] = None,
-    effects: bool = True,
     clip_sources: Optional[List[str]] = None,
 ) -> str:
     """
@@ -53,7 +51,6 @@ def render(
     fps: Output video FPS
     speed: Clip playback speed (1.0 = original)
     resolution: "1920:1080" or None (auto)
-    effects: Whether to apply basic color correction
     clip_sources: For multi-video: Path to the source of each clip
 
     Returns:
@@ -90,8 +87,7 @@ def render(
             path_to_idx[p] = len(unique_paths)
             unique_paths.append(p)
 
-    filters = _build_filters(clips, clip_sources, path_to_idx,
-                              resolution, speed, effects)
+    filters = _build_filters(clips, clip_sources, path_to_idx, resolution, speed)
     music_idx = len(unique_paths)
 
     cmd = ["ffmpeg", "-y"]
@@ -124,20 +120,17 @@ def _build_filters(
     path_to_idx: dict,
     resolution: str,
     speed: float,
-    effects: bool,
 ) -> List[str]:
     filters = []
 
     for i, (clip, src) in enumerate(zip(clips, clip_sources)):
         src_idx = path_to_idx[src]
-        effect_str = _color_grade() if effects else ""
 
         f = (
             f"[{src_idx}:v]"
             f"trim=start={clip.start:.3f}:end={clip.end:.3f},"
             f"setpts=PTS-STARTPTS,"
             f"setpts=PTS/{speed:.4f},"
-            f"{effect_str}"
             f"scale={resolution},"
             f"setsar=1,"
             f"format=yuv420p"
@@ -149,12 +142,6 @@ def _build_filters(
     filters.append(f"{concat}concat=n={len(clips)}:v=1:a=0[outv]")
 
     return filters
-
-
-def _color_grade() -> str:
-    """Light cinematic color correction"""
-    return "eq=contrast=1.08:brightness=-0.03:saturation=1.1,"
-
 # Resolution detection
 
 def _detect_resolution(video_path: str) -> str:

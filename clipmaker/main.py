@@ -3,7 +3,7 @@ main.py — entry point
 
 Usage:
 python -m clipmaker video.mp4 music.mp3
-python -m clipmaker video.mp4 music.mp3 -o result.mp4 --effects --speed 1.1
+python -m clipmaker video.mp4 music.mp3 -o result.mp4 --speed 1.1
 python -m clipmaker v1.mp4 v2.mp4 --music music.mp3 -o result.mp4
 """
 
@@ -132,7 +132,6 @@ def main(argv=None):
         fps=args.fps,
         speed=args.speed,
         resolution=args.resolution,
-        effects=args.effects,
         clip_sources=clip_sources,
     )
 

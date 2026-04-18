@@ -20,7 +20,6 @@ class PipelineService:
         speed: float = 1.0,
         resolution: str | None = None,
         max_clips: int | None = None,
-        effects: bool = True,
         sample_fps: float = 4.0,
     ):
         self._video_files = video_files
@@ -31,7 +30,6 @@ class PipelineService:
         self._speed = speed
         self._resolution = resolution
         self._max_clips = max_clips
-        self._effects = effects
         self._sample_fps = sample_fps
         self._process: asyncio.subprocess.Process | None = None
 
@@ -56,8 +54,6 @@ class PipelineService:
             cmd.extend(["--resolution", self._resolution])
         if self._max_clips is not None:
             cmd.extend(["--max-clips", str(self._max_clips)])
-        if self._effects:
-            cmd.append("--effects")
         return cmd
 
     async def _terminate_process_tree(self) -> None:
