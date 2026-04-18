@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 WAIT_AUDIO, WAIT_VIDEO = range(2)
 
 PROCESSING_TIMEOUT = 500
+TELEGRAM_SEND_VIDEO_WRITE_TIMEOUT = 180
+TELEGRAM_SEND_VIDEO_READ_TIMEOUT = 60
+TELEGRAM_SEND_VIDEO_CONNECT_TIMEOUT = 20
+TELEGRAM_SEND_VIDEO_POOL_TIMEOUT = 20
 SESSION_TTL_SEC = 10 * 60
 SESSION_CLEANUP_INTERVAL_SEC = 60
 MAX_ACTIVE_SESSIONS = 20
@@ -483,6 +487,10 @@ class VideoBot:
                     video=f,
                     caption=f"🎬 Готово! Время обработки: {elapsed:.0f} сек.",
                     supports_streaming=True,
+                    write_timeout=TELEGRAM_SEND_VIDEO_WRITE_TIMEOUT,
+                    read_timeout=TELEGRAM_SEND_VIDEO_READ_TIMEOUT,
+                    connect_timeout=TELEGRAM_SEND_VIDEO_CONNECT_TIMEOUT,
+                    pool_timeout=TELEGRAM_SEND_VIDEO_POOL_TIMEOUT,
                 )
             delivered = True
 
@@ -516,6 +524,13 @@ class VideoBot:
                 "• Слишком большие или длинные видео\n"
                 "• Высокая нагрузка на сервер\n\n"
                 "Попробуй с более короткими клипами или позже. /run"
+            )
+        except telegram.error.TimedOut as e:
+            logger.exception(f"[Process] TELEGRAM TIMEOUT user={user_id}: {e}")
+            await self._notify(
+                session.chat_id,
+                "Video was prepared, but Telegram timed out while uploading it.\n\n"
+                "Please try again with /run. If it keeps happening, reduce the final video size or clip length."
             )
         except Exception as e:
             logger.exception(f"[Process] ERROR user={user_id}: {e}")
