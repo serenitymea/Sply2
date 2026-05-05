@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List
 
 from .analyzer import analyze_audio, analyze_video
-from .selector import select_clips, select_clips_multi
+from .selector import select_clips
 from .renderer import render
 
 
@@ -71,9 +71,9 @@ def parse_args(argv=None):
     )
     p.add_argument(
         "--effects",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Включить лёгкую цветокоррекцию на этапе рендера",
+        action="store_true",
+        default=True,
+        help="Применить лёгкую цветокоррекцию",
     )
     p.add_argument(
         "--sample-fps",
@@ -110,6 +110,8 @@ def main(argv=None):
     audio = analyze_audio(args.music)
 
     # video analyze
+    # For multi-video, we analyze the first one (the music is the same for everyone),
+    # and we combine motion scores when selecting clips
     if len(args.videos) == 1:
         video = analyze_video(args.videos[0], sample_fps=args.sample_fps)
         clips = select_clips(video, audio, max_clips=args.max_clips)
@@ -130,7 +132,6 @@ def main(argv=None):
         fps=args.fps,
         speed=args.speed,
         resolution=args.resolution,
-        effects=args.effects,
         clip_sources=clip_sources,
     )
 
@@ -144,19 +145,45 @@ def _run_multi_video(
     max_clips: int | None,
     sample_fps: float,
 ):
-    """Analyze all sources and select clips globally across videos."""
-    videos = []
+    """Analyze and select clips from multiple video files one by one"""
+    from .selector import Clip
+
+    n = len(video_paths)
+    per_video = (max_clips or 40) // n + 1
+
+    all_clips: list[Clip] = []
+    all_sources: list[str] = []
 
     for i, vpath in enumerate(video_paths):
-        print(f"\n[main] === Video {i+1}/{len(video_paths)}: {vpath} ===")
-        videos.append(analyze_video(vpath, sample_fps=sample_fps))
+        print(f"\n[main] === Video {i+1}/{n}: {vpath} ===")
+        video = analyze_video(vpath, sample_fps=sample_fps)
+        clips = select_clips(video, audio, max_clips=per_video)
+        all_clips.extend(clips)
+        all_sources.extend([vpath] * len(clips))
 
-    return select_clips_multi(
-        videos=videos,
-        audio=audio,
-        video_paths=video_paths,
-        max_clips=max_clips,
-    )
+    # Alternating clips from different sources (zip-interleave)
+    merged_clips: list[Clip] = []
+    merged_sources: list[str] = []
+    groups = [
+        [(c, s) for c, s in zip(all_clips, all_sources) if s == vp]
+        for vp in video_paths
+    ]
+    iters = [iter(g) for g in groups]
+    active = list(range(n))
+    while active:
+        next_active = []
+        for i in active:
+            try:
+                c, s = next(iters[i])
+                merged_clips.append(c)
+                merged_sources.append(s)
+                next_active.append(i)
+            except StopIteration:
+                pass
+        active = next_active
+
+    cap = max_clips or len(merged_clips)
+    return merged_clips[:cap], merged_sources[:cap]
 
 
 if __name__ == "__main__":

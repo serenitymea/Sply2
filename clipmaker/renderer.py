@@ -9,6 +9,7 @@ clip playback speed (speed)
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import List, Optional, Union
 
 from .selector import Clip
@@ -37,7 +38,6 @@ def render(
     fps: int = 30,
     speed: float = 1.0,
     resolution: Optional[str] = None,
-    effects: bool = False,
     clip_sources: Optional[List[str]] = None,
 ) -> str:
     """
@@ -87,14 +87,7 @@ def render(
             path_to_idx[p] = len(unique_paths)
             unique_paths.append(p)
 
-    filters = _build_filters(
-        clips=clips,
-        clip_sources=clip_sources,
-        path_to_idx=path_to_idx,
-        resolution=resolution,
-        speed=speed,
-        effects=effects,
-    )
+    filters = _build_filters(clips, clip_sources, path_to_idx, resolution, speed)
     music_idx = len(unique_paths)
 
     cmd = ["ffmpeg", "-y"]
@@ -127,32 +120,22 @@ def _build_filters(
     path_to_idx: dict,
     resolution: str,
     speed: float,
-    effects: bool,
 ) -> List[str]:
     filters = []
-    width, height = _split_resolution(resolution)
 
     for i, (clip, src) in enumerate(zip(clips, clip_sources)):
         src_idx = path_to_idx[src]
-        filter_parts = [
-            f"[{src_idx}:v]trim=start={clip.start:.3f}:end={clip.end:.3f}",
-            "setpts=PTS-STARTPTS",
-            f"setpts=PTS/{speed:.4f}",
-            (
-                f"scale={width}:{height}:force_original_aspect_ratio=increase:"
-                f"flags=lanczos"
-            ),
-            f"crop={width}:{height}",
-            "setsar=1",
-        ]
-        if effects:
-            filter_parts.extend([
-                "eq=contrast=1.03:saturation=1.08:brightness=0.01",
-                "unsharp=5:5:0.6:5:5:0.0",
-            ])
-        filter_parts.append("format=yuv420p")
 
-        f = ",".join(filter_parts) + f"[v{i}]"
+        f = (
+            f"[{src_idx}:v]"
+            f"trim=start={clip.start:.3f}:end={clip.end:.3f},"
+            f"setpts=PTS-STARTPTS,"
+            f"setpts=PTS/{speed:.4f},"
+            f"scale={resolution},"
+            f"setsar=1,"
+            f"format=yuv420p"
+            f"[v{i}]"
+        )
         filters.append(f)
 
     concat = "".join(f"[v{i}]" for i in range(len(clips)))
@@ -188,12 +171,3 @@ def _detect_resolution(video_path: str) -> str:
     except Exception as e:
         print(f"[renderer] resolution detection failed ({e}), using 1920:1080")
         return "1920:1080"
-
-
-def _split_resolution(resolution: str) -> tuple[int, int]:
-    width_str, height_str = resolution.split(":")
-    width = int(width_str)
-    height = int(height_str)
-    if width <= 0 or height <= 0:
-        raise ValueError(f"Invalid resolution: {resolution}")
-    return width, height

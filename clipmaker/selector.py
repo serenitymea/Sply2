@@ -1,18 +1,16 @@
 """
-Selecting video clips based on music beat intervals.
+Selecting video clips based on music beat intervals
 
-The selector keeps the runtime cheap by working with precomputed motion scores,
-but tries to avoid the obvious MVP problems:
-- choosing only the noisiest / shakiest windows
-- cutting on every single beat for fast tracks
-- repeating the same source too aggressively in multi-video mode
+For each beat interval, we find the window in the video with the highest motion score
+Avoiding overlaps between clips
+Optionally, we use an ML model for re-ranking
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from statistics import median
-from typing import List, Optional, Sequence, Tuple
+import glob
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 import numpy as np
 
@@ -53,34 +51,42 @@ def select_clips(
     Returns:
     Clip list sorted by beat order
     """
-    segments = _build_segments(
-        beat_times=audio.beat_times,
-        tempo=audio.tempo,
-        min_clip_duration=min_clip_duration,
-    )
-    if max_clips is not None:
-        segments = segments[:max_clips]
+    beat_times = audio.beat_times
+    n_beats = len(beat_times) - 1
+
+    if max_clips is None:
+        max_clips = n_beats
+    else:
+        max_clips = min(max_clips, n_beats)
+
+    model = None
 
     clips: List[Clip] = []
-    used_ranges: List[tuple[float, float]] = []
-    used_centers: List[float] = []
+    # The number of occupied seconds in the video (including overlap_seconds)
+    used_ranges: List[tuple] = []
 
-    for beat_index, _, beat_dur in segments:
+    for i in range(max_clips):
+        beat_start = beat_times[i]
+        beat_dur = beat_times[i + 1] - beat_start
+
+        if beat_dur < min_clip_duration:
+            continue
+
         clip = _find_best_window(
             video=video,
             duration=beat_dur,
             used_ranges=used_ranges,
             overlap_seconds=overlap_seconds,
-            used_centers=used_centers,
         )
         if clip is None:
             continue
 
-        clip.beat_index = beat_index
+        clip.beat_index = i
         clips.append(clip)
+
+        # Mark as busy
         used_ranges.append((clip.start - overlap_seconds,
                              clip.end + overlap_seconds))
-        used_centers.append((clip.start + clip.end) * 0.5)
 
     print(f"[selector] {len(clips)} clips selected")
     if clips:
@@ -90,122 +96,15 @@ def select_clips(
 
     return clips
 
-
-def select_clips_multi(
-    videos: Sequence[VideoFeatures],
-    audio: AudioFeatures,
-    video_paths: Sequence[str],
-    max_clips: Optional[int] = None,
-    min_clip_duration: float = 0.2,
-    overlap_seconds: float = 0.0,
-) -> tuple[List[Clip], List[str]]:
-    """
-    Global multi-video selection.
-
-    For every music segment, we score the best candidate in each source and then
-    pick the strongest one with a small penalty for long same-source streaks.
-    """
-    if len(videos) != len(video_paths):
-        raise ValueError("videos/video_paths length mismatch")
-
-    segments = _build_segments(
-        beat_times=audio.beat_times,
-        tempo=audio.tempo,
-        min_clip_duration=min_clip_duration,
-    )
-    if max_clips is not None:
-        segments = segments[:max_clips]
-
-    used_ranges = [[] for _ in videos]
-    used_centers = [[] for _ in videos]
-
-    clips: List[Clip] = []
-    clip_sources: List[str] = []
-    last_source: str | None = None
-    same_source_run = 0
-
-    for beat_index, _, beat_dur in segments:
-        best_choice: tuple[Clip, str, int, float] | None = None
-
-        for video_idx, (video, path) in enumerate(zip(videos, video_paths)):
-            clip = _find_best_window(
-                video=video,
-                duration=beat_dur,
-                used_ranges=used_ranges[video_idx],
-                overlap_seconds=overlap_seconds,
-                used_centers=used_centers[video_idx],
-            )
-            if clip is None:
-                continue
-
-            score = clip.score
-            if path == last_source:
-                score -= 0.08 + 0.04 * same_source_run
-
-            if best_choice is None or score > best_choice[3]:
-                best_choice = (clip, path, video_idx, score)
-
-        if best_choice is None:
-            continue
-
-        clip, path, video_idx, _ = best_choice
-        clip.beat_index = beat_index
-        clips.append(clip)
-        clip_sources.append(path)
-        used_ranges[video_idx].append((clip.start - overlap_seconds,
-                                       clip.end + overlap_seconds))
-        used_centers[video_idx].append((clip.start + clip.end) * 0.5)
-
-        if path == last_source:
-            same_source_run += 1
-        else:
-            last_source = path
-            same_source_run = 0
-
-    print(f"[selector] {len(clips)} multi-source clips selected")
-    return clips, clip_sources
-
 # Internal helpers
-
-
-def _build_segments(
-    beat_times: np.ndarray,
-    tempo: float,
-    min_clip_duration: float,
-) -> List[Tuple[int, float, float]]:
-    if len(beat_times) < 2:
-        return []
-
-    beat_intervals = np.diff(beat_times)
-    median_beat = float(median(beat_intervals)) if len(beat_intervals) else 0.5
-
-    beats_per_clip = 1
-    if tempo >= 150 or median_beat <= 0.28:
-        beats_per_clip = 2
-    if tempo >= 185 or median_beat <= 0.18:
-        beats_per_clip = 4
-
-    segments: List[Tuple[int, float, float]] = []
-    i = 0
-    last_index = len(beat_times) - 1
-
-    while i < last_index:
-        end_index = min(i + beats_per_clip, last_index)
-        duration = float(beat_times[end_index] - beat_times[i])
-        if duration >= min_clip_duration:
-            segments.append((i, float(beat_times[i]), duration))
-        i = end_index
-
-    return segments
 
 def _find_best_window(
     video: VideoFeatures,
     duration: float,
     used_ranges: list,
     overlap_seconds: float,
-    used_centers: list[float],
 ) -> Optional[Clip]:
-    """Sliding window over video, returns the best balanced clip."""
+    """Sliding window over video, returns the clip with the best motion score"""
     fps = video.fps
     scores = video.motion_scores
     total = video.frame_count
@@ -221,42 +120,26 @@ def _find_best_window(
     # step — 0.25 sec
     step = max(1, int(fps * 0.25))
 
-    best_score = float("-inf")
+    best_score = -1.0
     best_start = 0.0
 
     for fi in range(0, max_start_frame, step):
         start_sec = fi / fps
         end_sec = (fi + win_frames) / fps
 
+        # overlap rewiew
         if _overlaps(start_sec, end_sec, used_ranges, overlap_seconds):
             continue
 
-        window = scores[fi: fi + win_frames]
-        mean_score = float(window.mean())
-        peak_score = float(window.max())
-        volatility = float(np.abs(np.diff(window)).mean()) if len(window) > 1 else 0.0
-        similarity_penalty = _reuse_penalty(
-            start_sec=start_sec,
-            end_sec=end_sec,
-            used_centers=used_centers,
-        )
-        score = (
-            mean_score * 0.60
-            + peak_score * 0.32
-            - volatility * 0.22
-            - similarity_penalty
-        )
+        score = float(scores[fi: fi + win_frames].mean())
         if score > best_score:
             best_score = score
             best_start = start_sec
 
-    if best_score == float("-inf"):
-        return None
-
     return Clip(
         start=best_start,
         end=best_start + duration,
-        score=max(0.0, best_score),
+        score=best_score,
     )
 
 
@@ -265,14 +148,3 @@ def _overlaps(start: float, end: float, used: list, margin: float) -> bool:
         if start < u_end + margin and end > u_start - margin:
             return True
     return False
-
-
-def _reuse_penalty(start_sec: float, end_sec: float, used_centers: list[float]) -> float:
-    if not used_centers:
-        return 0.0
-
-    center = (start_sec + end_sec) * 0.5
-    nearest = min(abs(center - other) for other in used_centers)
-    if nearest >= 2.5:
-        return 0.0
-    return (2.5 - nearest) / 2.5 * 0.18
