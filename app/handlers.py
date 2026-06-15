@@ -110,7 +110,7 @@ class VideoBot:
             return True
         if update.effective_message:
             await update.effective_message.reply_text(
-                "Этот бот работает только в личных сообщениях. Напиши ему в приват."
+                "This bot only works in private chats. Message it directly."
             )
         return False
 
@@ -139,7 +139,7 @@ class VideoBot:
                     logger.info(f"[Session] EXPIRED user={user_id}")
                     await self._notify(
                         session.chat_id,
-                        "Сессия истекла из-за бездействия. Начни заново с /run."
+                        "Your session expired due to inactivity. Start again with /run."
                     )
                     self._drop_session(user_id)
         except asyncio.CancelledError:
@@ -151,12 +151,12 @@ class VideoBot:
         if not await self._require_private_chat(update):
             return ConversationHandler.END
         await update.message.reply_text(
-            "👋 Привет! Я бот для создания видео-эдитов.\n\n"
-            "Что я умею:\n"
-            "• Принимать видео и аудио\n"
-            "• Синхронизировать музыку с видео\n"
-            "• Делать видео-эдит\n\n"
-            "▶️ Нажми /run чтобы начать"
+            "👋 Hi! I create video edits for you.\n\n"
+            "What I can do:\n"
+            "• Receive video and audio files\n"
+            "• Sync music with video\n"
+            "• Create a video edit\n\n"
+            "▶️ Press /run to start"
         )
 
     async def cmd_run(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -170,31 +170,31 @@ class VideoBot:
         )
         if remaining == 0:
             await update.message.reply_text(
-                f"Лимит на сегодня исчерпан: {DAILY_GENERATION_LIMIT} генераций.\n"
-                "Попробуй снова завтра."
+                f"Today's limit is used up: {DAILY_GENERATION_LIMIT} generations.\n"
+                "Try again tomorrow."
             )
             return ConversationHandler.END
 
         remaining_hint = (
             ""
             if remaining is None
-            else f"\n\nОсталось генераций сегодня: {remaining} из {DAILY_GENERATION_LIMIT}"
+            else f"\n\nGenerations left today: {remaining} of {DAILY_GENERATION_LIMIT}"
         )
 
         position = await self._queue.get_position(user_id)
         if position is not None:
             if position == 0:
-                await update.message.reply_text("⚙️ Твоё задание уже обрабатывается. Жди, скоро будет результат!")
+                await update.message.reply_text("⚙️ Your job is already being processed. Hang tight, the result is coming soon!")
             else:
                 await update.message.reply_text(
-                    f"⏳ Ты уже в очереди на позиции {position}.\n"
-                    "Когда подойдёт твоя очередь — сообщу!"
+                    f"⏳ You are already in the queue at position {position}.\n"
+                    "I will let you know when it is your turn!"
                 )
             return ConversationHandler.END
 
         if not self._runtime.try_register_session(user_id, MAX_ACTIVE_SESSIONS, SESSION_RUNTIME_TTL_SEC):
             await update.message.reply_text(
-                "Сейчас слишком много активных сессий. Попробуй ещё раз чуть позже."
+                "There are too many active sessions right now. Try again a bit later."
             )
             return ConversationHandler.END
 
@@ -207,10 +207,10 @@ class VideoBot:
         self._touch_session(user_id, session)
 
         await update.message.reply_text(
-            "🎬 Начинаем!\n\n"
-            "🎵 Шаг 1 из 2: Отправь аудио файл или ссылку на видео с музыкой\n"
+            "🎬 Let's start!\n\n"
+            "🎵 Step 1 of 2: Send an audio file or a link to a video with music\n"
             "(TikTok)\n\n"
-            "❌ Для отмены — /cancel"
+            "❌ To cancel — /cancel"
             f"{remaining_hint}"
         )
         return WAIT_AUDIO
@@ -223,17 +223,17 @@ class VideoBot:
         self._touch_session(user_id, session)
 
         if not session:
-            await update.message.reply_text("Сначала запусти /run")
+            await update.message.reply_text("Run /run first")
             return ConversationHandler.END
 
         if session.done_called:
-            await update.message.reply_text("⏳ Уже добавлено в очередь, ожидай...")
+            await update.message.reply_text("⏳ Already added to the queue, please wait...")
             return WAIT_VIDEO
 
         if not session.video_files:
             await update.message.reply_text(
-                "❌ Нужно хотя бы одно видео!\n"
-                f"Отправь видео файл (максимум {MAX_VIDEOS} штук), затем /done"
+                "❌ You need at least one video!\n"
+                f"Send a video file (maximum {MAX_VIDEOS}), then /done"
             )
             return WAIT_VIDEO
 
@@ -243,15 +243,15 @@ class VideoBot:
         )
         if not allowed:
             await update.message.reply_text(
-                f"Лимит на сегодня исчерпан: {DAILY_GENERATION_LIMIT} генераций.\n"
-                "Попробуй снова завтра."
+                f"Today's limit is used up: {DAILY_GENERATION_LIMIT} generations.\n"
+                "Try again tomorrow."
             )
             return ConversationHandler.END
 
         remaining_hint = (
             ""
             if remaining is None
-            else f"\n\nОсталось генераций сегодня: {remaining} из {DAILY_GENERATION_LIMIT}"
+            else f"\n\nGenerations left today: {remaining} of {DAILY_GENERATION_LIMIT}"
         )
         session.done_called = True
         position = await self._queue.enqueue(user_id)
@@ -263,19 +263,19 @@ class VideoBot:
             session.done_called = False
 
         if position is None:
-            await update.message.reply_text("⏳ Уже в очереди, ожидай...")
+            await update.message.reply_text("⏳ Already in the queue, please wait...")
         elif position == 1:
             await update.message.reply_text(
-                f"✅ Принято! {len(session.video_files)} видео + аудио\n\n"
-                "🚀 Очередь свободна, начинаю обработку прямо сейчас!\n"
-                "Это может занять несколько минут..."
+                f"✅ Got it! {len(session.video_files)} video(s) + audio\n\n"
+                "🚀 The queue is free, starting processing right now!\n"
+                "This may take a few minutes..."
                 f"{remaining_hint}"
             )
         else:
             await update.message.reply_text(
-                f"✅ Принято! {len(session.video_files)} видео + аудио\n\n"
-                f"⏳ Твоя позиция в очереди: {position}\n"
-                "Как только подойдёт очередь — сообщу и начну обработку."
+                f"✅ Got it! {len(session.video_files)} video(s) + audio\n\n"
+                f"⏳ Your position in the queue: {position}\n"
+                "I will let you know and start processing when it is your turn."
                 f"{remaining_hint}"
             )
         return ConversationHandler.END
@@ -288,18 +288,18 @@ class VideoBot:
         self._touch_session(user_id, session)
 
         if not session:
-            await update.message.reply_text("Нечего отменять. Начни с /run")
+            await update.message.reply_text("Nothing to cancel. Start with /run")
             return ConversationHandler.END
 
         cancel_result = await self._queue.cancel(user_id)
         if cancel_result == "active":
-            await update.message.reply_text("Отмена запрошена. Останавливаю текущую обработку.")
+            await update.message.reply_text("Cancellation requested. Stopping the current processing job.")
             return ConversationHandler.END
 
         self._drop_session(user_id)
         await update.message.reply_text(
-            "❌ Операция отменена.\n"
-            "Начни заново с /run когда будешь готов."
+            "❌ Operation cancelled.\n"
+            "Start again with /run when you are ready."
         )
         return ConversationHandler.END
 
@@ -312,7 +312,7 @@ class VideoBot:
         self._touch_session(user_id, session)
 
         if not session:
-            await update.message.reply_text("Сессия не найдена. Начни с /run")
+            await update.message.reply_text("Session not found. Start with /run")
             return ConversationHandler.END
 
         svc = VideoService(session.tmp_dir, user_id=user_id)
@@ -321,34 +321,34 @@ class VideoBot:
             audio_path = await svc.acquire_audio(update.message)
         except asyncio.TimeoutError:
             await update.message.reply_text(
-                "Не удалось скачать аудио — превышено время ожидания (5 минут).\n\n"
-                "Возможные причины:\n"
-                "• Ссылка недоступна или заблокирована\n"
-                "• Очень медленное соединение\n\n"
-                "Попробуй другую ссылку или отправь файл напрямую."
+                "Could not download the audio — the 5-minute timeout was exceeded.\n\n"
+                "Possible reasons:\n"
+                "• The link is unavailable or blocked\n"
+                "• The connection is very slow\n\n"
+                "Try another link or send the file directly."
             )
             return WAIT_AUDIO
         except ValueError as e:
             await update.message.reply_text(
                 f"❌ {e}\n\n"
-                "Попробуй ещё раз или отправь другой файл/ссылку."
+                "Try again or send another file/link."
             )
             return WAIT_AUDIO
         except Exception as e:
             logger.exception(f"Audio error user={user_id}: {e}")
             await update.message.reply_text(
-                "❌ Не удалось получить аудио. Попробуй ещё раз или отправь файл другим способом."
+                "❌ Could not get the audio. Try again or send the file another way."
             )
             return WAIT_AUDIO
 
         session.audio_path = audio_path
         await update.message.reply_text(
-            "✅ Аудио получено!\n\n"
-            "🎬 Шаг 2 из 2: Отправляй видео файлы\n"
-            f"Максимум: {MAX_VIDEOS} видео, каждое до 20 MB\n"
-            "Суммарная длительность всех видео — не более 10 минут.\n\n"
-            "Когда отправишь все — напиши /done\n"
-            "❌ Для отмены — /cancel"
+            "✅ Audio received!\n\n"
+            "🎬 Step 2 of 2: Send your video files\n"
+            f"Maximum: {MAX_VIDEOS} videos, up to 20 MB each\n"
+            "Total duration of all videos must be no more than 10 minutes.\n\n"
+            "When you have sent everything, type /done\n"
+            "❌ To cancel — /cancel"
         )
         return WAIT_VIDEO
 
@@ -360,13 +360,13 @@ class VideoBot:
         self._touch_session(user_id, session)
 
         if not session:
-            await update.message.reply_text("Сессия не найдена. Начни с /run")
+            await update.message.reply_text("Session not found. Start with /run")
             return ConversationHandler.END
 
         if len(session.video_files) >= MAX_VIDEOS:
             await update.message.reply_text(
-                f"❌ Уже добавлено максимум видео ({MAX_VIDEOS}).\n"
-                "Напиши /done для начала обработки."
+                f"❌ The maximum number of videos has already been added ({MAX_VIDEOS}).\n"
+                "Type /done to start processing."
             )
             return WAIT_VIDEO
 
@@ -379,14 +379,14 @@ class VideoBot:
             )
         except asyncio.TimeoutError:
             await update.message.reply_text(
-                "Не удалось загрузить видео — слишком долго.\n"
-                "Попробуй ещё раз или отправь файл меньшего размера."
+                "Could not upload the video — it took too long.\n"
+                "Try again or send a smaller file."
             )
             return WAIT_VIDEO
         except ValueError as e:
             await update.message.reply_text(
                 f"❌ {e}\n\n"
-                "Поддерживаемые форматы: mp4, mov, mkv"
+                "Supported formats: mp4, mov, mkv"
             )
             return WAIT_VIDEO
         except RuntimeError as e:
@@ -395,7 +395,7 @@ class VideoBot:
         except Exception as e:
             logger.exception(f"Video error user={user_id}: {e}")
             await update.message.reply_text(
-                "❌ Ошибка при загрузке видео. Попробуй ещё раз."
+                "❌ Error while uploading the video. Try again."
             )
             return WAIT_VIDEO
 
@@ -407,23 +407,23 @@ class VideoBot:
         total_min = int(session.total_video_duration) // 60
         total_sec = int(session.total_video_duration) % 60
         remaining_dur = MAX_TOTAL_DURATION_SEC - session.total_video_duration
-        duration_info = f"Суммарная длительность: {total_min}м {total_sec}с / 10м"
+        duration_info = f"Total duration: {total_min}m {total_sec}s / 10m"
 
         if remaining == 0 or remaining_dur < 10:
             await update.message.reply_text(
-                f"✅ Видео #{count} получено.\n"
+                f"✅ Video #{count} received.\n"
                 f"{duration_info}\n\n"
-                f"Достигнут лимит ({MAX_VIDEOS} видео или 10 минут).\n"
-                "Напиши /done для начала обработки."
+                f"Limit reached ({MAX_VIDEOS} videos or 10 minutes).\n"
+                "Type /done to start processing."
             )
         else:
             rem_min = int(remaining_dur) // 60
             rem_sec = int(remaining_dur) % 60
             await update.message.reply_text(
-                f"✅ Видео #{count} получено.\n"
+                f"✅ Video #{count} received.\n"
                 f"{duration_info}\n"
-                f"Можно добавить ещё {remaining} видео (осталось ~{rem_min}м {rem_sec}с).\n\n"
-                "Отправь ещё видео или /done для обработки."
+                f"You can add {remaining} more video(s) (~{rem_min}m {rem_sec}s left).\n\n"
+                "Send another video or /done to process."
             )
         return WAIT_VIDEO
 
@@ -434,7 +434,7 @@ class VideoBot:
         if not self._is_private_chat(update):
             return
         await update.message.reply_text(
-            "Привет! 👋 Нажми /start чтобы узнать как я работаю, или /run чтобы сразу начать."
+            "Hi! 👋 Press /start to see how I work, or /run to start right away."
         )
 
 
@@ -452,9 +452,9 @@ class VideoBot:
         logger.info(f"[Process] START user={user_id} videos={len(session.video_files)}")
         await self._notify(
             session.chat_id,
-            f"🚀 Начинаю обработку!\n"
-            f"Видео: {len(session.video_files)} шт.\n\n"
-            "Это займёт несколько минут. Пришлю результат как только будет готово."
+            f"🚀 Starting processing!\n"
+            f"Videos: {len(session.video_files)}\n\n"
+            "This will take a few minutes. I will send the result as soon as it is ready."
         )
 
         try:
@@ -475,17 +475,17 @@ class VideoBot:
                 self._runtime.release_pipeline_slot(pipeline_token)
 
             if not output_path.exists() or output_path.stat().st_size == 0:
-                raise RuntimeError("Выходной файл не был создан или пустой")
+                raise RuntimeError("The output file was not created or is empty")
 
             elapsed = time.monotonic() - start_time
             logger.info(f"[Process] DONE user={user_id} elapsed={elapsed:.1f}s")
-            await self._notify(session.chat_id, "📤 Обработка завершена! Отправляю файл...")
+            await self._notify(session.chat_id, "📤 Processing finished! Sending the file...")
 
             with open(output_path, "rb") as f:
                 await self._bot.send_video(
                     chat_id=session.chat_id,
                     video=f,
-                    caption=f"🎬 Готово! Время обработки: {elapsed:.0f} сек.",
+                    caption=f"🎬 Done! Processing time: {elapsed:.0f} sec.",
                     supports_streaming=True,
                     write_timeout=TELEGRAM_SEND_VIDEO_WRITE_TIMEOUT,
                     read_timeout=TELEGRAM_SEND_VIDEO_READ_TIMEOUT,
@@ -501,17 +501,17 @@ class VideoBot:
                 logger.error(f"[Process] TIMEOUT user={user_id} after {elapsed:.0f}s")
                 await self._notify(
                     session.chat_id,
-                    "Превышено время обработки (8 минут).\n\n"
-                    "Возможные причины:\n"
-                    "• Слишком большие или длинные видео\n"
-                    "• Высокая нагрузка на сервер\n\n"
-                    "Попробуй с более короткими клипами или позже. /run"
+                    "Processing timed out (8 minutes).\n\n"
+                    "Possible reasons:\n"
+                    "• The videos are too large or too long\n"
+                    "• High server load\n\n"
+                    "Try with shorter clips or try again later. /run"
                 )
                 raise
             logger.info(f"[Process] CANCELLED user={user_id}")
             await self._notify(
                 session.chat_id,
-                "Обработка отменена. Можешь начать заново с /run."
+                "Processing cancelled. You can start again with /run."
             )
             raise
         except asyncio.TimeoutError:
@@ -519,11 +519,11 @@ class VideoBot:
             logger.error(f"[Process] TIMEOUT user={user_id} after {elapsed:.0f}s")
             await self._notify(
                 session.chat_id,
-                "Превышено время обработки (8 минут).\n\n"
-                "Возможные причины:\n"
-                "• Слишком большие или длинные видео\n"
-                "• Высокая нагрузка на сервер\n\n"
-                "Попробуй с более короткими клипами или позже. /run"
+                "Processing timed out (8 minutes).\n\n"
+                "Possible reasons:\n"
+                "• The videos are too large or too long\n"
+                "• High server load\n\n"
+                "Try with shorter clips or try again later. /run"
             )
         except telegram.error.TimedOut as e:
             logger.exception(f"[Process] TELEGRAM TIMEOUT user={user_id}: {e}")
@@ -536,9 +536,9 @@ class VideoBot:
             logger.exception(f"[Process] ERROR user={user_id}: {e}")
             await self._notify(
                 session.chat_id,
-                "❌ Произошла ошибка при обработке видео.\n\n"
-                "Попробуй начать заново через /run\n"
-                "Если ошибка повторяется — попробуй другие файлы."
+                "❌ An error occurred while processing the video.\n\n"
+                "Try starting again with /run\n"
+                "If the error repeats, try different files."
             )
         finally:
             self._drop_session(user_id)

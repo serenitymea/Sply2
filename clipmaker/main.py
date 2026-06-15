@@ -23,64 +23,64 @@ from .renderer import render
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="clipmaker",
-        description="Автоматический видеомонтаж под музыку",
+        description="Automatic music-driven video editing",
     )
 
     p.add_argument(
         "videos",
         nargs="+",
         metavar="VIDEO",
-        help="Один или несколько видеофайлов",
+        help="One or more video files",
     )
     p.add_argument(
         "--music", "-m",
         required=True,
         metavar="MUSIC",
-        help="Аудиофайл (mp3, wav, m4a, ...)",
+        help="Audio file (mp3, wav, m4a, ...)",
     )
     p.add_argument(
         "--output", "-o",
         default="output.mp4",
         metavar="OUTPUT",
-        help="Путь к выходному файлу (default: output.mp4)",
+        help="Path to the output file (default: output.mp4)",
     )
     p.add_argument(
         "--fps",
         type=int,
         default=30,
-        help="FPS выходного видео (default: 30)",
+        help="Output video FPS (default: 30)",
     )
     p.add_argument(
         "--speed",
         type=float,
         default=1.0,
-        help="Скорость клипов (0.5–3.0, default: 1.0)",
+        help="Clip speed (0.5-3.0, default: 1.0)",
     )
     p.add_argument(
         "--resolution",
         default=None,
         metavar="WxH",
-        help='Разрешение выхода, например "1920:1080". Авто если не указано.',
+        help='Output resolution, for example "1920:1080". Auto if omitted.',
     )
     p.add_argument(
         "--max-clips",
         type=int,
         default=None,
         metavar="N",
-        help="Максимальное количество клипов",
+        help="Maximum number of clips",
     )
     p.add_argument(
         "--effects",
         action="store_true",
         default=True,
-        help="Применить лёгкую цветокоррекцию",
+        help="Apply light color correction",
     )
     p.add_argument(
         "--sample-fps",
         type=float,
         default=4.0,
         metavar="FPS",
-        help="С какой частотой сэмплировать видео при анализе (default: 4)",
+        help="Video sampling FPS for analysis (default: 4)",
     )
 
     return p.parse_args(argv)
@@ -94,10 +94,10 @@ def main(argv=None):
     # check files
     for v in args.videos:
         if not Path(v).exists():
-            print(f"[error] файл не найден: {v}", file=sys.stderr)
+            print(f"[error] file not found: {v}", file=sys.stderr)
             sys.exit(1)
     if not Path(args.music).exists():
-        print(f"[error] музыка не найдена: {args.music}", file=sys.stderr)
+        print(f"[error] music not found: {args.music}", file=sys.stderr)
         sys.exit(1)
 
     print("=" * 50)

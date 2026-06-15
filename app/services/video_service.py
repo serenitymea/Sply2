@@ -52,7 +52,7 @@ def _check_size(file_obj) -> None:
     size = getattr(file_obj, "file_size", None)
     if size and size > MAX_FILE_SIZE_BYTES:
         mb = size // (1024 * 1024)
-        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 20 MB.")
+        raise ValueError(f"The file is too large ({mb} MB). Maximum size is 20 MB.")
 
 
 def _check_downloaded_size(path: Path) -> None:
@@ -60,7 +60,7 @@ def _check_downloaded_size(path: Path) -> None:
     if size > MAX_FILE_SIZE_BYTES:
         mb = size // (1024 * 1024)
         path.unlink(missing_ok=True)
-        raise ValueError(f"Файл слишком большой ({mb} MB). Максимум - 20 MB.")
+        raise ValueError(f"The file is too large ({mb} MB). Maximum size is 20 MB.")
 
 
 def _guess_suffix(file_obj, default: str) -> str:
@@ -93,16 +93,16 @@ async def get_video_duration(video_path: Path) -> float:
         if not raw:
             err = stderr.decode(errors="replace").strip()
             logger.error(f"ffprobe returned empty output for {video_path}: {err}")
-            raise RuntimeError("Не удалось определить длительность видео. Попробуй другой файл.")
+            raise RuntimeError("Could not detect the video duration. Try another file.")
         return float(raw)
     except (asyncio.TimeoutError, FileNotFoundError) as e:
         logger.error(f"ffprobe failed for {video_path}: {e}")
-        raise RuntimeError("Не удалось проверить длительность видео. Убедись, что ffprobe установлен.")
+        raise RuntimeError("Could not check the video duration. Make sure ffprobe is installed.")
     except RuntimeError:
         raise
     except Exception as e:
         logger.error(f"ffprobe unexpected error for {video_path}: {e}")
-        raise RuntimeError("Не удалось определить длительность видео. Попробуй другой файл.")
+        raise RuntimeError("Could not detect the video duration. Try another file.")
 
 
 class VideoService:
@@ -129,7 +129,7 @@ class VideoService:
         audio_path = self._tmp_dir / "m1.mp3"
 
         if msg.text and _is_url(msg.text):
-            await msg.reply_text("🎬 Скачиваю аудио по ссылке... Это может занять до нескольких минут.")
+            await msg.reply_text("🎬 Downloading audio from the link... This may take a few minutes.")
             async with self._preprocess_slot():
                 downloaded = await self._downloader.download(msg.text.strip())
                 _check_downloaded_size(downloaded)
@@ -147,12 +147,12 @@ class VideoService:
 
             if not file_obj:
                 raise ValueError(
-                    "Неподдерживаемый формат документа.\n"
-                    "Поддерживаются: mp3, wav, ogg, flac, m4a\n"
+                    "Unsupported document format.\n"
+                    "Supported formats: mp3, wav, ogg, flac, m4a\n"
                 )
 
             _check_size(file_obj)
-            await msg.reply_text("🎬 Получаю аудио файл...")
+            await msg.reply_text("🎬 Receiving the audio file...")
 
             raw_path = self._tmp_dir / f"audio_raw{_guess_suffix(file_obj, '.bin')}"
             raw_path.unlink(missing_ok=True)
@@ -162,10 +162,10 @@ class VideoService:
                 try:
                     await _download_tg_file(file_obj, raw_path)
                 except asyncio.TimeoutError:
-                    raise asyncio.TimeoutError("Загрузка файла заняла слишком долго.")
+                    raise asyncio.TimeoutError("The file download took too long.")
 
                 if not raw_path.exists() or raw_path.stat().st_size == 0:
-                    raise ValueError("Не удалось получить файл от Telegram. Попробуй ещё раз.")
+                    raise ValueError("Could not get the file from Telegram. Try again.")
 
                 _check_downloaded_size(raw_path)
 
@@ -177,10 +177,10 @@ class VideoService:
                     logger.warning("ffmpeg audio conversion failed, using original file: %s", e)
                     final_path = raw_path
         else:
-            raise ValueError("Отправь аудио файл (mp3, wav, ogg) или ссылку на музыку")
+            raise ValueError("Send an audio file (mp3, wav, ogg) or a music link")
 
         if not final_path.exists() or final_path.stat().st_size == 0:
-            raise ValueError("Не удалось обработать аудио файл. Попробуй другой.")
+            raise ValueError("Could not process the audio file. Try another one.")
 
         logger.info(f"Audio ready: {final_path} ({final_path.stat().st_size // 1024} KB)")
         return final_path
@@ -200,12 +200,12 @@ class VideoService:
 
         if not file_obj:
             raise ValueError(
-                "Неподдерживаемый формат.\n"
-                "Поддерживаются: mp4, mov, mkv, avi, webm"
+                "Unsupported format.\n"
+                "Supported formats: mp4, mov, mkv, avi, webm"
             )
 
         _check_size(file_obj)
-        await msg.reply_text(f"🎬 Получаю видео #{idx + 1}...")
+        await msg.reply_text(f"🎬 Receiving video #{idx + 1}...")
 
         raw_path = self._tmp_dir / f"video_raw_{idx}{_guess_suffix(file_obj, '.bin')}"
         raw_path.unlink(missing_ok=True)
@@ -215,10 +215,10 @@ class VideoService:
             try:
                 await _download_tg_file(file_obj, raw_path)
             except asyncio.TimeoutError:
-                raise asyncio.TimeoutError("Загрузка видео заняла слишком долго. Попробуй файл поменьше.")
+                raise asyncio.TimeoutError("The video download took too long. Try a smaller file.")
 
             if not raw_path.exists() or raw_path.stat().st_size == 0:
-                raise ValueError("Не удалось получить файл от Telegram. Попробуй ещё раз.")
+                raise ValueError("Could not get the file from Telegram. Try again.")
 
             _check_downloaded_size(raw_path)
 
@@ -231,7 +231,7 @@ class VideoService:
                 final_path = raw_path
 
             if not final_path.exists() or final_path.stat().st_size == 0:
-                raise ValueError("Не удалось обработать видео файл. Попробуй другой.")
+                raise ValueError("Could not process the video file. Try another one.")
 
             duration = await get_video_duration(final_path)
 
@@ -243,10 +243,10 @@ class VideoService:
             clip_min = int(duration) // 60
             clip_sec = int(duration) % 60
             raise ValueError(
-                f"Суммарная длительность видео превысит лимит 10 минут.\n"
-                f"Уже добавлено: {current_min}м {current_sec}с, "
-                f"этот клип: {clip_min}м {clip_sec}с.\n"
-                f"Отправь видео покороче или начни обработку с /done."
+                f"Total video duration would exceed the 10-minute limit.\n"
+                f"Already added: {current_min}m {current_sec}s, "
+                f"this clip: {clip_min}m {clip_sec}s.\n"
+                f"Send a shorter video or start processing with /done."
             )
 
         logger.info(f"Video ready: {final_path} ({final_path.stat().st_size // (1024 * 1024)} MB, {duration:.1f}s)")

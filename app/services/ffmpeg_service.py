@@ -27,13 +27,13 @@ class FFmpegService:
                 process.kill()
             except Exception:
                 pass
-            raise RuntimeError(f"ffmpeg завис (>{FFMPEG_TIMEOUT}с). Попробуй файл поменьше.")
+            raise RuntimeError(f"ffmpeg hung (>{FFMPEG_TIMEOUT}s). Try a smaller file.")
 
         if process.returncode != 0:
             err_text = stderr.decode(errors="replace").strip()
             lines = [line for line in err_text.splitlines() if line.strip()]
-            short_err = "\n".join(lines[-3:]) if lines else "неизвестная ошибка"
-            raise RuntimeError(f"ffmpeg завершился с ошибкой:\n{short_err}")
+            short_err = "\n".join(lines[-3:]) if lines else "unknown error"
+            raise RuntimeError(f"ffmpeg exited with an error:\n{short_err}")
 
     async def to_mp3(self, input_path: str, output_path: str) -> None:
         await self.run(

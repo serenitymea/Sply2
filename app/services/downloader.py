@@ -21,15 +21,15 @@ _TIKTOK_SHORTLINK_HOSTS = {"vt.tiktok.com", "vm.tiktok.com"}
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
 _ERROR_MAP = [
-    (["private", "members only"], "Видео приватное или только для подписчиков."),
-    (["unavailable", "not available"], "Видео недоступно или удалено."),
-    (["copyright"],                    "Видео заблокировано по авторским правам."),
-    (["sign in", "login"],             "Для этого видео требуется авторизация. Попробуй другую ссылку."),
-    (["no video formats", "no media"], "Не удалось найти медиафайл по этой ссылке."),
-    (["permission denied"],            "Ошибка доступа на сервере. Попробуй позже."),
+    (["private", "members only"], "The video is private or subscribers-only."),
+    (["unavailable", "not available"], "The video is unavailable or has been removed."),
+    (["copyright"],                    "The video is blocked due to copyright."),
+    (["sign in", "login"],             "This video requires authorization. Try another link."),
+    (["no video formats", "no media"], "Could not find a media file for this link."),
+    (["permission denied"],            "Server access error. Try again later."),
 ]
 
-_DEFAULT_ERROR = "Не удалось скачать. Попробуй другую ссылку или отправь файл напрямую."
+_DEFAULT_ERROR = "Could not download it. Try another link or send the file directly."
 
 
 def _clean(text: str) -> str:
@@ -142,14 +142,14 @@ class MediaDownloader:
 
         parsed = urlparse(normalized)
         if parsed.scheme not in {"http", "https"}:
-            raise ValueError("Поддерживаются только http/https ссылки на TikTok.")
+            raise ValueError("Only http/https TikTok links are supported.")
 
         host = (parsed.hostname or "").rstrip(".").lower()
         if not host:
-            raise ValueError("Не удалось распознать адрес ссылки.")
+            raise ValueError("Could not recognize the link address.")
 
         if host != ALLOWED_URL_ROOT and not host.endswith(f".{ALLOWED_URL_ROOT}"):
-            raise ValueError("Сейчас поддерживаются только ссылки TikTok.")
+            raise ValueError("Only TikTok links are supported right now.")
 
         try:
             ip = ipaddress.ip_address(host)
@@ -157,12 +157,12 @@ class MediaDownloader:
             ip = None
 
         if ip is not None:
-            raise ValueError("Ссылки по прямому IP-адресу запрещены.")
+            raise ValueError("Links with direct IP addresses are not allowed.")
 
         try:
             addrinfo = socket.getaddrinfo(host, None)
         except socket.gaierror:
-            raise ValueError("Не удалось проверить адрес ссылки. Попробуй другую ссылку.")
+            raise ValueError("Could not verify the link address. Try another link.")
 
         for entry in addrinfo:
             resolved_ip = ipaddress.ip_address(entry[4][0])
@@ -174,7 +174,7 @@ class MediaDownloader:
                 or resolved_ip.is_reserved
                 or resolved_ip.is_unspecified
             ):
-                raise ValueError("Небезопасный адрес ссылки заблокирован.")
+                raise ValueError("Unsafe link address blocked.")
 
         return normalized
 
@@ -213,7 +213,7 @@ class MediaDownloader:
         with yt_dlp.YoutubeDL(self._build_probe_opts()) as ydl:
             info = ydl.extract_info(url, download=False)
         if not info:
-            raise ValueError("Не удалось получить данные TikTok по ссылке.")
+            raise ValueError("Could not get TikTok data from the link.")
         return info
 
     def _expand_short_url(self, url: str) -> str:
@@ -260,7 +260,7 @@ class MediaDownloader:
 
     def _resolve_music_target_url(self, url: str, max_depth: int = 3) -> str:
         if max_depth <= 0:
-            raise ValueError("Не удалось определить прямую ссылку на трек TikTok.")
+            raise ValueError("Could not determine the direct TikTok track link.")
 
         info = self._probe_info(url)
 
@@ -282,7 +282,7 @@ class MediaDownloader:
             if target_url:
                 return target_url
 
-        raise ValueError("Не удалось найти ролик для этого трека TikTok.")
+        raise ValueError("Could not find a video for this TikTok track.")
 
     # ------------------------------------------------------------------
     # Cookie discovery
@@ -316,7 +316,7 @@ class MediaDownloader:
 
         files = list(self._output_dir.glob("*.mp3"))
         if not files:
-            raise ValueError("Файл не был создан. Попробуй другую ссылку.")
+            raise ValueError("The file was not created. Try another link.")
         return max(files, key=lambda p: p.stat().st_mtime)
 
     def _download_with_opts(self, url: str, opts: dict) -> tuple[dict, Path]:
@@ -357,7 +357,7 @@ class MediaDownloader:
 
         if filename.stat().st_size == 0:
             filename.unlink(missing_ok=True)
-            raise ValueError("Скачанный файл оказался пустым. Попробуй другую ссылку.")
+            raise ValueError("The downloaded file is empty. Try another link.")
 
         logger.info("Downloaded: %s (%d KB)", filename, filename.stat().st_size // 1024)
         return filename
